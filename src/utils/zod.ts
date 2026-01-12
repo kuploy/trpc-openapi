@@ -111,3 +111,64 @@ export const coerceSchema = (schema: ZodObject<ZodRawShape>) => {
     else if (instanceofZodTypeObject(unwrappedShapeSchema)) coerceSchema(unwrappedShapeSchema);
   });
 };
+
+/**
+ * Safely check if a schema is optional without triggering parse/preprocessing.
+ * Important for zod-form-data schemas where isOptional()/safeParse() would trigger form parsing.
+ */
+export const isSchemaOptional = (schema: $ZodType): boolean => {
+  if (instanceofZodTypeKind(schema, 'optional')) return true;
+  if (instanceofZodTypeKind(schema, 'nullable')) return true;
+  if (instanceofZodTypeKind(schema, 'default')) return true;
+  if (instanceofZodTypeKind(schema, 'pipe')) {
+    return isSchemaOptional((schema as z.ZodPipe<$ZodTypes>).def.out);
+  }
+  // Zod v3 compat: check ZodEffects inner schema
+  const def = (schema as any)?._def;
+  if (def?.typeName === 'ZodEffects') {
+    return isSchemaOptional(def.schema);
+  }
+  return false;
+};
+
+/**
+ * Detect if a schema is a zod-form-data file field (zfd.file()).
+ * In Zod v4, zfd.file() creates: pipe(transform → custom) where custom validates instanceof File/Blob.
+ */
+export const instanceofZodFormDataFile = (_type: $ZodType): boolean => {
+  const type = unwrapZodType(_type, false);
+
+  // Zod v4: pipe(transform → custom) pattern from zfd.file()
+  if (instanceofZodTypeKind(type, 'pipe')) {
+    const out = (type as z.ZodPipe<$ZodTypes>).def.out;
+    if (instanceofZodTypeKind(out, 'custom')) return true;
+    if (instanceofZodTypeKind(out, 'any')) return true;
+    return instanceofZodFormDataFile(out);
+  }
+
+  // Zod v3 compat: ZodEffects(preprocess) -> ZodEffects(refinement) -> ZodAny
+  const def = (type as any)?._def;
+  if (def?.typeName === 'ZodEffects' && def.effect?.type === 'preprocess') {
+    const inner = def.schema;
+    if (inner?._def?.typeName === 'ZodEffects' && inner._def.effect?.type === 'refinement') {
+      if (inner._def.schema?._def?.typeName === 'ZodAny') return true;
+    }
+    if (inner?._def?.typeName === 'ZodAny') return true;
+    if (inner?._def?.typeName === 'ZodUnion') {
+      return inner._def.options.some((opt: any) => instanceofZodFormDataFile(opt));
+    }
+  }
+
+  return false;
+};
+
+/** Check if an object schema contains any file fields */
+export const schemaContainsFileField = (type: $ZodType): boolean => {
+  const unwrapped = unwrapZodType(type, true);
+  if (!instanceofZodTypeObject(unwrapped)) return false;
+
+  return Object.values(unwrapped.shape).some((fieldSchema) => {
+    const field = fieldSchema as $ZodType;
+    return instanceofZodFormDataFile(field) || instanceofZodFormDataFile(unwrapZodType(field, false));
+  });
+};

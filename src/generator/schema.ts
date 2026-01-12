@@ -21,10 +21,36 @@ import {
   instanceofZodTypeLikeString,
   instanceofZodTypeLikeVoid,
   instanceofZodTypeOptional,
+  instanceofZodFormDataFile,
+  isSchemaOptional,
+  schemaContainsFileField,
   unwrapZodType,
   zodSupportsCoerce,
 } from '../utils';
 import { HttpMethods } from './paths';
+
+/**
+ * Generate a zod schema for form-data, replacing file fields with string+binary for OpenAPI.
+ */
+const generateFormDataSchema = (
+  zodSchema: z.ZodObject<z.ZodRawShape>,
+): z.ZodObject<z.ZodRawShape> => {
+  const shape = zodSchema.shape;
+  const newShape: Record<string, z.ZodTypeAny> = {};
+
+  for (const [key, fieldSchema] of Object.entries(shape)) {
+    const field = fieldSchema as z.ZodTypeAny;
+    if (instanceofZodFormDataFile(field) || instanceofZodFormDataFile(unwrapZodType(field, false))) {
+      const isOpt = isSchemaOptional(field);
+      const fileSchema = z.string().meta({ format: 'binary' });
+      newShape[key] = isOpt ? fileSchema.optional() : fileSchema;
+    } else {
+      newShape[key] = field;
+    }
+  }
+
+  return z.object(newShape);
+};
 
 export const getParameterObjects = (
   schema: z.ZodObject<z.ZodRawShape>,
@@ -159,10 +185,19 @@ export const getRequestBodyObject = (
     return undefined;
   }
 
+  // Auto-detect multipart/form-data when file fields are present
+  const hasFileFields = schemaContainsFileField(dedupedSchema);
+  const effectiveContentTypes = hasFileFields
+    ? (['multipart/form-data'] as OpenApiContentType[])
+    : contentTypes;
+  const effectiveSchema = hasFileFields
+    ? generateFormDataSchema(dedupedSchema)
+    : dedupedSchema;
+
   const content: ZodOpenApiContentObject = {};
-  for (const contentType of contentTypes) {
+  for (const contentType of effectiveContentTypes) {
     content[contentType] = {
-      schema: dedupedSchema,
+      schema: effectiveSchema,
     };
   }
   return {

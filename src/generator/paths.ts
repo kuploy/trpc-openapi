@@ -16,6 +16,7 @@ import {
   instanceofZodType,
   instanceofZodTypeLikeVoid,
   instanceofZodTypeObject,
+  isSchemaOptional,
   unwrapZodType,
 } from '../utils';
 import { getParameterObjects, getRequestBodyObject, getResponsesObject, hasInputs } from './schema';
@@ -106,8 +107,8 @@ export const getOpenApiPathsObject = <TMeta = Record<string, unknown>>(
       // When no output parser is defined, use empty object schema (procedure still included in OpenAPI doc)
       const responseSchema = instanceofZodType(outputParser) ? outputParser : z.object({});
 
-      // Request body is required only when the input schema does not accept undefined (e.g. not .optional())
-      const isInputRequired = !(inputParser as z.ZodTypeAny).safeParse(undefined).success;
+      // Use safe optionality check to avoid triggering zfd preprocessing
+      const isInputRequired = !isSchemaOptional(inputParser);
 
       const o = inputParser.meta();
       const inputSchema = unwrapZodType(inputParser, true).meta({

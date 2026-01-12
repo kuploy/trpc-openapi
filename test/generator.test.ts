@@ -3561,4 +3561,104 @@ describe('generator', () => {
 
     expect(openApiDocument.paths!['/metadata/all']!.get!.operationId).toBe('getAllMetadataAboutMe');
   });
+
+  describe('multipart/form-data support', () => {
+    test('with zod-form-data file schema - auto-detects multipart', async () => {
+      const { zfd } = await import('zod-form-data');
+
+      const appRouter = t.router({
+        uploadFile: t.procedure
+          .meta({ openapi: { method: 'POST', path: '/upload', override: true } })
+          .input(
+            zfd.formData({
+              name: z.string(),
+              file: zfd.file(),
+            }),
+          )
+          .output(z.object({ success: z.boolean() }))
+          .mutation(() => ({ success: true })),
+      });
+
+      const openApiDocument = generateOpenApiDocument(appRouter, defaultDocOpts);
+
+      const requestBody = openApiDocument.paths!['/upload']?.post?.requestBody as any;
+      expect(requestBody).toBeDefined();
+      expect(Object.keys(requestBody.content)).toEqual(['multipart/form-data']);
+      expect(requestBody.content['multipart/form-data'].schema.properties.file).toEqual({
+        type: 'string',
+        format: 'binary',
+      });
+      expect(requestBody.content['multipart/form-data'].schema.properties.name.type).toBe('string');
+    });
+
+    test('with multiple file fields', async () => {
+      const { zfd } = await import('zod-form-data');
+
+      const appRouter = t.router({
+        uploadMultiple: t.procedure
+          .meta({ openapi: { method: 'POST', path: '/upload-multiple', override: true } })
+          .input(
+            zfd.formData({
+              document: zfd.file(),
+              thumbnail: zfd.file(),
+              title: z.string(),
+            }),
+          )
+          .output(z.object({ success: z.boolean() }))
+          .mutation(() => ({ success: true })),
+      });
+
+      const openApiDocument = generateOpenApiDocument(appRouter, defaultDocOpts);
+
+      const schema = (openApiDocument.paths!['/upload-multiple']?.post?.requestBody as any)?.content[
+        'multipart/form-data'
+      ]?.schema;
+
+      expect(schema.properties.document).toEqual({ type: 'string', format: 'binary' });
+      expect(schema.properties.thumbnail).toEqual({ type: 'string', format: 'binary' });
+      expect(schema.properties.title.type).toBe('string');
+    });
+
+    test('backward compatibility - non-file schemas use application/json', () => {
+      const appRouter = t.router({
+        createUser: t.procedure
+          .meta({ openapi: { method: 'POST', path: '/users', override: true } })
+          .input(z.object({ name: z.string() }))
+          .output(z.object({ id: z.string() }))
+          .mutation(() => ({ id: '123' })),
+      });
+
+      const openApiDocument = generateOpenApiDocument(appRouter, defaultDocOpts);
+
+      expect(
+        Object.keys((openApiDocument.paths!['/users']?.post?.requestBody as any)?.content),
+      ).toEqual(['application/json']);
+    });
+
+    test('file fields are marked as required correctly', async () => {
+      const { zfd } = await import('zod-form-data');
+
+      const appRouter = t.router({
+        upload: t.procedure
+          .meta({ openapi: { method: 'POST', path: '/upload', override: true } })
+          .input(
+            zfd.formData({
+              requiredFile: zfd.file(),
+              optionalName: z.string().optional(),
+            }),
+          )
+          .output(z.object({ success: z.boolean() }))
+          .mutation(() => ({ success: true })),
+      });
+
+      const openApiDocument = generateOpenApiDocument(appRouter, defaultDocOpts);
+
+      const schema = (openApiDocument.paths!['/upload']?.post?.requestBody as any)?.content[
+        'multipart/form-data'
+      ]?.schema;
+
+      expect(schema.required).toContain('requiredFile');
+      expect(schema.required).not.toContain('optionalName');
+    });
+  });
 });
