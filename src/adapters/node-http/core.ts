@@ -30,7 +30,7 @@ import {
   getRequestSignal,
 } from '../../utils';
 import { TRPC_ERROR_CODE_HTTP_STATUS, getErrorFromUnknown } from './errors';
-import { getBody, getQuery } from './input';
+import { getBody, getMultipartBody, getQuery } from './input';
 import { createProcedureCache } from './procedures';
 
 export type CreateOpenApiNodeHttpHandlerOptions<
@@ -104,8 +104,9 @@ export const createOpenApiNodeHttpHandler = <
 
       const contentType = getContentType(req);
       const useBody = acceptsRequestBody(method);
+      const isMultipart = contentType?.startsWith('multipart/form-data');
 
-      if (useBody && !contentType?.startsWith('application/json')) {
+      if (useBody && !isMultipart && !contentType?.startsWith('application/json')) {
         throw new TRPCError({
           code: 'UNSUPPORTED_MEDIA_TYPE',
           message: contentType
@@ -117,8 +118,16 @@ export const createOpenApiNodeHttpHandler = <
       const { inputParser } = getInputOutputParsers(procedure.procedure);
       const unwrappedSchema = unwrapZodType(inputParser, true);
 
-      // input should stay undefined if z.void()
-      if (!instanceofZodTypeLikeVoid(unwrappedSchema)) {
+      if (isMultipart) {
+        const formData = await getMultipartBody(req);
+        if (pathInput) {
+          for (const [key, value] of Object.entries(pathInput)) {
+            formData.append(key, value as string);
+          }
+        }
+        input = formData;
+      } else if (!instanceofZodTypeLikeVoid(unwrappedSchema)) {
+        // input should stay undefined if z.void()
         input = {
           ...(useBody ? await getBody(req, maxBodySize) : getQuery(req, url)),
           ...pathInput,
@@ -126,7 +135,7 @@ export const createOpenApiNodeHttpHandler = <
       }
 
       // if supported, coerce all string values to correct types
-      if (zodSupportsCoerce && instanceofZodTypeObject(unwrappedSchema)) {
+      if (!isMultipart && zodSupportsCoerce && instanceofZodTypeObject(unwrappedSchema)) {
         if (!useBody) {
           for (const [key, shape] of Object.entries(unwrappedSchema.shape)) {
             let isArray = false;
