@@ -1,6 +1,6 @@
 {
   "name": "@dokploy/trpc-openapi",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "description": "tRPC OpenAPI",
   "author": "dokploy",
   "private": false,
@@ -76,6 +76,7 @@
     "ts-node": "^10.9.1",
     "typescript": "5.8.3",
     "zod": "^4.0.0",
+    "zod-form-data": "^2.0.8",
     "zod-openapi": "5.4.2"
   },
   "optionalDependencies": {

@@ -1,3 +1,4 @@
+import { Readable } from 'stream';
 import { TRPCError } from '@trpc/server';
 import parse from 'co-body';
 import { NodeHTTPRequest } from '../../types';
@@ -72,4 +73,21 @@ export const getBody = async (req: NodeHTTPRequest, maxBodySize = BODY_100_KB): 
   }
 
   return req.body;
+};
+
+export const getMultipartBody = async (req: NodeHTTPRequest): Promise<FormData> => {
+  const contentType = req.headers['content-type'];
+  if (!contentType) {
+    throw new TRPCError({
+      message: 'Missing content-type header',
+      code: 'BAD_REQUEST',
+    });
+  }
+
+  const readable = Readable.toWeb(req as unknown as Readable) as ReadableStream;
+  const response = new Response(readable, {
+    headers: { 'content-type': contentType },
+  });
+
+  return response.formData();
 };

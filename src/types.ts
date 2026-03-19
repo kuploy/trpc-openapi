@@ -19,6 +19,7 @@ type TRPCMeta = Record<string, unknown>;
 export type OpenApiContentType =
   | 'application/json'
   | 'application/x-www-form-urlencoded'
+  | 'multipart/form-data'
   // eslint-disable-next-line @typescript-eslint/ban-types
   | (string & {});
 
