@@ -753,7 +753,9 @@ describe('generator', () => {
                 },
               ],
               "summary": undefined,
-              "tags": undefined,
+              "tags": Array [
+                "readUsers",
+              ],
             },
             "post": Object {
               "description": undefined,
@@ -848,7 +850,9 @@ describe('generator', () => {
                 },
               ],
               "summary": undefined,
-              "tags": undefined,
+              "tags": Array [
+                "createUser",
+              ],
             },
           },
           "/users/{id}": Object {
@@ -931,7 +935,9 @@ describe('generator', () => {
                 },
               ],
               "summary": undefined,
-              "tags": undefined,
+              "tags": Array [
+                "deleteUser",
+              ],
             },
             "get": Object {
               "description": undefined,
@@ -1027,7 +1033,9 @@ describe('generator', () => {
                 },
               ],
               "summary": undefined,
-              "tags": undefined,
+              "tags": Array [
+                "readUser",
+              ],
             },
             "patch": Object {
               "description": undefined,
@@ -1138,7 +1146,9 @@ describe('generator', () => {
                 },
               ],
               "summary": undefined,
-              "tags": undefined,
+              "tags": Array [
+                "updateUser",
+              ],
             },
           },
         },
@@ -1367,7 +1377,9 @@ describe('generator', () => {
           },
         ],
         "summary": undefined,
-        "tags": undefined,
+        "tags": Array [
+          "createUser",
+        ],
       }
     `);
     expect(openApiDocument.paths!['/user']!.get!).toMatchInlineSnapshot(`
@@ -1474,7 +1486,9 @@ describe('generator', () => {
           },
         ],
         "summary": undefined,
-        "tags": undefined,
+        "tags": Array [
+          "getUser",
+        ],
       }
     `);
   });
@@ -1856,7 +1870,11 @@ describe('generator', () => {
     const serverIdParam = params.find((p) => p.name === 'serverId');
     expect(containerIdParam).toBeDefined();
     expect(containerIdParam!.required).toBe(true);
-    expect(containerIdParam!.schema).toMatchObject({ type: 'string', minLength: 1, pattern: containerIdRegex.source });
+    expect(containerIdParam!.schema).toMatchObject({
+      type: 'string',
+      minLength: 1,
+      pattern: containerIdRegex.source,
+    });
     expect(serverIdParam).toBeDefined();
     expect(serverIdParam!.required).not.toBe(true);
   });
@@ -2792,7 +2810,9 @@ describe('generator', () => {
               },
             ],
             "summary": undefined,
-            "tags": undefined,
+            "tags": Array [
+              "procedure",
+            ],
           },
         },
         "/router/procedure": Object {
@@ -2886,7 +2906,9 @@ describe('generator', () => {
               },
             ],
             "summary": undefined,
-            "tags": undefined,
+            "tags": Array [
+              "router",
+            ],
           },
         },
         "/router/router/procedure": Object {
@@ -2980,7 +3002,9 @@ describe('generator', () => {
               },
             ],
             "summary": undefined,
-            "tags": undefined,
+            "tags": Array [
+              "router",
+            ],
           },
         },
       }
@@ -3118,7 +3142,7 @@ describe('generator', () => {
         (openApiDocument.paths!['/with-all']!.post!.requestBody as any).content['application/json'],
       ).toEqual(
         (openApiDocument.paths!['/with-all']!.post!.requestBody as any).content[
-        'application/x-www-form-urlencoded'
+          'application/x-www-form-urlencoded'
         ],
       );
       expect(
@@ -3610,9 +3634,8 @@ describe('generator', () => {
 
       const openApiDocument = generateOpenApiDocument(appRouter, defaultDocOpts);
 
-      const schema = (openApiDocument.paths!['/upload-multiple']?.post?.requestBody as any)?.content[
-        'multipart/form-data'
-      ]?.schema;
+      const schema = (openApiDocument.paths!['/upload-multiple']?.post?.requestBody as any)
+        ?.content['multipart/form-data']?.schema;
 
       expect(schema.properties.document).toEqual({ type: 'string', format: 'binary' });
       expect(schema.properties.thumbnail).toEqual({ type: 'string', format: 'binary' });
@@ -3660,5 +3683,77 @@ describe('generator', () => {
       expect(schema.required).toContain('requiredFile');
       expect(schema.required).not.toContain('optionalName');
     });
+  });
+
+  test('with partial openapi meta (only summary/description, no method/path)', () => {
+    const appRouter = t.router({
+      admin: t.router({
+        getUsers: t.procedure
+          .meta({
+            openapi: {
+              summary: 'Get all users',
+              description: 'Returns a list of all registered users.',
+            } as any,
+          })
+          .input(z.object({ limit: z.string().optional() }))
+          .output(z.object({ users: z.array(z.string()) }))
+          .query(() => ({ users: ['alice', 'bob'] })),
+        createUser: t.procedure
+          .meta({
+            openapi: {
+              summary: 'Create a user',
+              description: 'Creates a new user with the given name.',
+            } as any,
+          })
+          .input(z.object({ name: z.string() }))
+          .output(z.object({ id: z.string() }))
+          .mutation(() => ({ id: '1' })),
+      }),
+    });
+
+    const document = generateOpenApiDocument(appRouter, defaultDocOpts);
+
+    // Should auto-generate path and method from procedure type
+    const getEndpoint = document.paths!['/admin.getUsers']?.get;
+    expect(getEndpoint).toBeDefined();
+    expect(getEndpoint?.summary).toBe('Get all users');
+    expect(getEndpoint?.description).toBe('Returns a list of all registered users.');
+
+    const postEndpoint = document.paths!['/admin.createUser']?.post;
+    expect(postEndpoint).toBeDefined();
+    expect(postEndpoint?.summary).toBe('Create a user');
+    expect(postEndpoint?.description).toBe('Creates a new user with the given name.');
+  });
+
+  test('with partial openapi meta mixed with procedures without meta', () => {
+    const appRouter = t.router({
+      items: t.router({
+        list: t.procedure
+          .meta({
+            openapi: {
+              summary: 'List items',
+            } as any,
+          })
+          .input(z.void())
+          .output(z.object({ items: z.array(z.string()) }))
+          .query(() => ({ items: [] })),
+        create: t.procedure
+          .input(z.object({ name: z.string() }))
+          .output(z.object({ id: z.string() }))
+          .mutation(() => ({ id: '1' })),
+      }),
+    });
+
+    const document = generateOpenApiDocument(appRouter, defaultDocOpts);
+
+    // Endpoint with partial meta should have summary and auto-generated path/method
+    const listEndpoint = document.paths!['/items.list']?.get;
+    expect(listEndpoint).toBeDefined();
+    expect(listEndpoint?.summary).toBe('List items');
+
+    // Endpoint without meta should still work with auto-generated defaults
+    const createEndpoint = document.paths!['/items.create']?.post;
+    expect(createEndpoint).toBeDefined();
+    expect(createEndpoint?.summary).toBeUndefined();
   });
 });

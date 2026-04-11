@@ -83,7 +83,7 @@ export const forEachOpenApiProcedure = <TMeta = Record<string, unknown>>(
     } else if (additional && meta?.openapi) {
       openapi = { ...defaultOpenApiMeta, ...meta.openapi };
     } else if (meta?.openapi) {
-      openapi = { ...meta.openapi, ...defaultOpenApiMeta };
+      openapi = { ...defaultOpenApiMeta, ...meta.openapi };
     } else {
       openapi = defaultOpenApiMeta;
     }
@@ -94,8 +94,8 @@ export const forEachOpenApiProcedure = <TMeta = Record<string, unknown>>(
         type,
         procedure: procedure as OpenApiProcedure,
         meta: {
-          openapi,
           ...(meta as TMeta),
+          openapi,
         },
       });
     }
