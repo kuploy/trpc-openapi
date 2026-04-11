@@ -3693,7 +3693,7 @@ describe('generator', () => {
             openapi: {
               summary: 'Get all users',
               description: 'Returns a list of all registered users.',
-            } as any,
+            },
           })
           .input(z.object({ limit: z.string().optional() }))
           .output(z.object({ users: z.array(z.string()) }))
@@ -3703,7 +3703,7 @@ describe('generator', () => {
             openapi: {
               summary: 'Create a user',
               description: 'Creates a new user with the given name.',
-            } as any,
+            },
           })
           .input(z.object({ name: z.string() }))
           .output(z.object({ id: z.string() }))
@@ -3732,7 +3732,7 @@ describe('generator', () => {
           .meta({
             openapi: {
               summary: 'List items',
-            } as any,
+            },
           })
           .input(z.void())
           .output(z.object({ items: z.array(z.string()) }))
