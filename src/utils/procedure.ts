@@ -1,7 +1,7 @@
 import { TRPCProcedureType } from '@trpc/server';
 import { ZodObject, z } from 'zod';
 
-import { OpenApiMeta, OpenApiMethod, OpenApiProcedure, OpenApiProcedureRecord } from '../types';
+import { OpenApiMeta, OpenApiMethod, OpenApiProcedure, OpenApiProcedureRecord, ResolvedOpenApiMeta } from '../types';
 
 const mergeInputs = (inputParsers: ZodObject[]): ZodObject => {
   return inputParsers.reduce((acc, inputParser) => {
@@ -55,7 +55,7 @@ export const forEachOpenApiProcedure = <TMeta = Record<string, unknown>>(
     type: TRPCProcedureType;
     procedure: OpenApiProcedure;
     meta: {
-      openapi: NonNullable<OpenApiMeta['openapi']>;
+      openapi: ResolvedOpenApiMeta;
     } & TMeta;
   }) => void,
 ) => {
@@ -68,7 +68,7 @@ export const forEachOpenApiProcedure = <TMeta = Record<string, unknown>>(
     const additional = meta?.openapi?.additional ?? false;
     const override = meta?.openapi?.override ?? false;
 
-    const defaultOpenApiMeta: NonNullable<OpenApiMeta['openapi']> = {
+    const defaultOpenApiMeta: ResolvedOpenApiMeta = {
       method: getMethod(procedure as OpenApiProcedure),
       path: `/${path}`,
       enabled: true,
@@ -76,14 +76,14 @@ export const forEachOpenApiProcedure = <TMeta = Record<string, unknown>>(
       protect: true,
     };
 
-    let openapi: NonNullable<OpenApiMeta['openapi']>;
+    let openapi: ResolvedOpenApiMeta;
 
     if (override && meta?.openapi) {
-      openapi = { ...meta.openapi };
+      openapi = { ...meta.openapi } as ResolvedOpenApiMeta;
     } else if (additional && meta?.openapi) {
       openapi = { ...defaultOpenApiMeta, ...meta.openapi };
     } else if (meta?.openapi) {
-      openapi = { ...meta.openapi, ...defaultOpenApiMeta };
+      openapi = { ...defaultOpenApiMeta, ...meta.openapi };
     } else {
       openapi = defaultOpenApiMeta;
     }
@@ -94,8 +94,8 @@ export const forEachOpenApiProcedure = <TMeta = Record<string, unknown>>(
         type,
         procedure: procedure as OpenApiProcedure,
         meta: {
-          openapi,
           ...(meta as TMeta),
+          openapi,
         },
       });
     }

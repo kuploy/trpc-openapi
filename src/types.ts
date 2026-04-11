@@ -30,8 +30,10 @@ export type OpenApiMeta<TMeta = TRPCMeta> = TMeta & {
     /** When true, merge provided openapi with defaults (defaults first, then provided). */
     additional?: boolean;
     enabled?: boolean;
-    method: OpenApiMethod;
-    path: `/${string}`;
+    /** HTTP method. Auto-generated from procedure type (query→GET, mutation→POST) when omitted. */
+    method?: OpenApiMethod;
+    /** URL path. Auto-generated as /{routerName}.{procedureName} when omitted. */
+    path?: `/${string}`;
     operationId?: string;
     summary?: string;
     description?: string;
@@ -45,6 +47,13 @@ export type OpenApiMeta<TMeta = TRPCMeta> = TMeta & {
     errorResponses?: number[] | Record<number, string>;
   };
 };
+
+/**
+ * Internal resolved type where method and path are guaranteed after merging with defaults.
+ * Used internally after forEachOpenApiProcedure resolves auto-generated defaults.
+ */
+export type ResolvedOpenApiMeta = Required<Pick<NonNullable<OpenApiMeta['openapi']>, 'method' | 'path'>> &
+  NonNullable<OpenApiMeta['openapi']>;
 
 export type OpenApiProcedure = Procedure<
   ProcedureType,
