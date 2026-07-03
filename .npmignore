@@ -1,5 +1,7 @@
-*
-!dist/**/*
-!package.json
-!package-lock.json
-!LICENSE
+examples/
+examples/with-nextjs/
+examples/with-express/
+examples/with-interop/
+examples/with-serverless/
+examples/with-fastify/
+examples/with-nuxtjs/

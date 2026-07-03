@@ -1,0 +1,32 @@
+name: Publish to GitHub Packages
+
+# Publishes @kuploy/trpc-openapi to GitHub Packages when a v* tag is pushed
+# (or manually). Consumers (kuploy, kuploy-cloud) install it from the
+# @kuploy-scoped GitHub Packages registry with their existing NPM_TOKEN auth.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@kuploy"
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

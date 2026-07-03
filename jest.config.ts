@@ -9,5 +9,4 @@ module.exports = {
     escapeString: true,
     printBasicPrototype: true,
   },
-  prettierPath: require.resolve('formatter-for-jest-snapshots'),
 };

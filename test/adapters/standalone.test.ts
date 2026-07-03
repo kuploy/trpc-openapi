@@ -1,4 +1,5 @@
-import { createTRPCClient, httpBatchLink } from '@trpc/client';
+/* eslint-disable @typescript-eslint/ban-types */
+import { createTRPCProxyClient, httpBatchLink } from '@trpc/client';
 import { TRPCError, initTRPC } from '@trpc/server';
 import { createHTTPHandler } from '@trpc/server/adapters/standalone';
 import { Server } from 'http';
@@ -28,8 +29,6 @@ const clearMocks = () => {
   onErrorMock.mockClear();
 };
 
-let server: Server;
-
 const createHttpServerWithRouter = <TRouter extends OpenApiRouter>(
   handlerOpts: CreateOpenApiHttpHandlerOptions<TRouter>,
 ) => {
@@ -49,7 +48,7 @@ const createHttpServerWithRouter = <TRouter extends OpenApiRouter>(
   } as any);
 
   // eslint-disable-next-line @typescript-eslint/no-misused-promises
-  server = new Server((req, res) => {
+  const server = new Server((req, res) => {
     if (req.url!.startsWith('/trpc')) {
       req.url = req.url!.replace('/trpc', '');
       return httpHandler(req, res);
@@ -72,10 +71,9 @@ const t = initTRPC.meta<OpenApiMeta>().context<any>().create();
 describe('standalone adapter', () => {
   afterEach(() => {
     clearMocks();
-    server?.close();
   });
 
-  // Procedures without output parser use empty object schema and are included in OpenAPI.
+  // Please note: validating router does not happen in `production`.
   test('with invalid router', () => {
     const appRouter = t.router({
       invalidRoute: t.procedure
@@ -88,7 +86,7 @@ describe('standalone adapter', () => {
       createOpenApiHttpHandler({
         router: appRouter,
       });
-    }).not.toThrow();
+    }).toThrowError('[query.invalidRoute] - Output parser expects a Zod validator');
   });
 
   test('with not found path', async () => {
@@ -100,7 +98,7 @@ describe('standalone adapter', () => {
         .mutation(() => 'pong' as const),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -108,10 +106,12 @@ describe('standalone adapter', () => {
     const body = (await res.json()) as OpenApiErrorResponse;
 
     expect(res.status).toBe(404);
-    expect(body).toEqual(expect.objectContaining({ message: 'Not found', code: 'NOT_FOUND' }));
+    expect(body).toEqual({ message: 'Not found', code: 'NOT_FOUND' });
     expect(createContextMock).toHaveBeenCalledTimes(0);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(1);
+
+    close();
   });
 
   test('with not found method', async () => {
@@ -123,7 +123,7 @@ describe('standalone adapter', () => {
         .mutation(() => 'pong' as const),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -131,10 +131,12 @@ describe('standalone adapter', () => {
     const body = (await res.json()) as OpenApiErrorResponse;
 
     expect(res.status).toBe(404);
-    expect(body).toEqual(expect.objectContaining({ message: 'Not found', code: 'NOT_FOUND' }));
+    expect(body).toEqual({ message: 'Not found', code: 'NOT_FOUND' });
     expect(createContextMock).toHaveBeenCalledTimes(0);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(1);
+
+    close();
   });
 
   test('with missing content-type header', async () => {
@@ -146,35 +148,35 @@ describe('standalone adapter', () => {
         .mutation(({ input }) => ({ payload: input.payload })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
     const res = await fetch(`${url}/echo`, {
       method: 'POST',
-      body: JSON.stringify('Lily'),
-      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify('James'),
     });
     const body = (await res.json()) as OpenApiErrorResponse;
 
     expect(res.status).toBe(400);
-    expect(body).toEqual(
-      expect.objectContaining({
-        message: 'Input validation failed',
-        code: 'BAD_REQUEST',
-        issues: [
-          {
-            code: 'invalid_type',
-            expected: 'string',
-            message: 'Invalid input: expected string, received undefined',
-            path: ['payload'],
-          },
-        ],
-      }),
-    );
+    expect(body).toEqual({
+      message: 'Input validation failed',
+      code: 'BAD_REQUEST',
+      issues: [
+        {
+          code: 'invalid_type',
+          expected: 'string',
+          message: 'Required',
+          path: ['payload'],
+          received: 'undefined',
+        },
+      ],
+    });
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(1);
+
+    close();
   });
 
   test('with invalid content-type', async () => {
@@ -186,7 +188,7 @@ describe('standalone adapter', () => {
         .mutation(({ input }) => ({ payload: input.payload })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -197,16 +199,25 @@ describe('standalone adapter', () => {
     });
     const body = (await res.json()) as OpenApiErrorResponse;
 
-    expect(res.status).toBe(415);
-    expect(body).toEqual(
-      expect.objectContaining({
-        message: 'Unsupported content-type "text/plain',
-        code: 'UNSUPPORTED_MEDIA_TYPE',
-      }),
-    );
-    expect(createContextMock).toHaveBeenCalledTimes(0);
+    expect(res.status).toBe(400);
+    expect(body).toEqual({
+      message: 'Input validation failed',
+      code: 'BAD_REQUEST',
+      issues: [
+        {
+          code: 'invalid_type',
+          expected: 'string',
+          message: 'Required',
+          path: ['payload'],
+          received: 'undefined',
+        },
+      ],
+    });
+    expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(1);
+
+    close();
   });
 
   test('with missing input', async () => {
@@ -218,7 +229,7 @@ describe('standalone adapter', () => {
         .query(({ input }) => ({ payload: input.payload })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -226,23 +237,24 @@ describe('standalone adapter', () => {
     const body = (await res.json()) as OpenApiErrorResponse;
 
     expect(res.status).toBe(400);
-    expect(body).toEqual(
-      expect.objectContaining({
-        message: 'Input validation failed',
-        code: 'BAD_REQUEST',
-        issues: [
-          {
-            code: 'invalid_type',
-            expected: 'string',
-            message: 'Invalid input: expected string, received undefined',
-            path: ['payload'],
-          },
-        ],
-      }),
-    );
+    expect(body).toEqual({
+      message: 'Input validation failed',
+      code: 'BAD_REQUEST',
+      issues: [
+        {
+          code: 'invalid_type',
+          expected: 'string',
+          message: 'Required',
+          path: ['payload'],
+          received: 'undefined',
+        },
+      ],
+    });
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(1);
+
+    close();
   });
 
   test('with wrong input type', async () => {
@@ -254,7 +266,7 @@ describe('standalone adapter', () => {
         .mutation(({ input }) => ({ payload: input.payload })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -266,23 +278,24 @@ describe('standalone adapter', () => {
     const body = (await res.json()) as OpenApiErrorResponse;
 
     expect(res.status).toBe(400);
-    expect(body).toEqual(
-      expect.objectContaining({
-        message: 'Input validation failed',
-        code: 'BAD_REQUEST',
-        issues: [
-          {
-            code: 'invalid_type',
-            expected: 'string',
-            message: 'Invalid input: expected string, received number',
-            path: ['payload'],
-          },
-        ],
-      }),
-    );
+    expect(body).toEqual({
+      message: 'Input validation failed',
+      code: 'BAD_REQUEST',
+      issues: [
+        {
+          code: 'invalid_type',
+          expected: 'string',
+          message: 'Expected string, received number',
+          path: ['payload'],
+          received: 'number',
+        },
+      ],
+    });
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(1);
+
+    close();
   });
 
   test('with bad output', async () => {
@@ -295,27 +308,27 @@ describe('standalone adapter', () => {
         .mutation(() => 'fail'),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
     const res = await fetch(`${url}/echo`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ payload: '@Mario' }),
+      body: JSON.stringify({ payload: '@jlalmes' }),
     });
     const body = (await res.json()) as OpenApiErrorResponse;
 
     expect(res.status).toBe(500);
-    expect(body).toEqual(
-      expect.objectContaining({
-        message: 'Output validation failed',
-        code: 'INTERNAL_SERVER_ERROR',
-      }),
-    );
+    expect(body).toEqual({
+      message: 'Output validation failed',
+      code: 'INTERNAL_SERVER_ERROR',
+    });
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(1);
+
+    close();
   });
 
   test('with valid routes', async () => {
@@ -332,16 +345,16 @@ describe('standalone adapter', () => {
         .mutation(({ input }) => ({ greeting: `Hello ${input.name}!` })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
     {
-      const res = await fetch(`${url}/say-hello?name=Lily`, { method: 'GET' });
-      const body = (await res.json()) as { greeting: string };
+      const res = await fetch(`${url}/say-hello?name=James`, { method: 'GET' });
+      const body = await res.json();
 
       expect(res.status).toBe(200);
-      expect(body).toEqual({ greeting: 'Hello Lily!' });
+      expect(body).toEqual({ greeting: 'Hello James!' });
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
@@ -352,16 +365,18 @@ describe('standalone adapter', () => {
       const res = await fetch(`${url}/say-hello`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Lily' }),
+        body: JSON.stringify({ name: 'James' }),
       });
       const body = await res.json();
 
       expect(res.status).toBe(200);
-      expect(body).toEqual({ greeting: 'Hello Lily!' });
+      expect(body).toEqual({ greeting: 'Hello James!' });
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
     }
+
+    close();
   });
 
   test('with void input', async () => {
@@ -378,15 +393,12 @@ describe('standalone adapter', () => {
         .mutation(() => 'pong' as const),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
     {
-      const res = await fetch(`${url}/ping`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const res = await fetch(`${url}/ping`, { method: 'GET' });
       const body = await res.json();
 
       expect(res.status).toBe(200);
@@ -398,10 +410,7 @@ describe('standalone adapter', () => {
       clearMocks();
     }
     {
-      const res = await fetch(`${url}/ping`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const res = await fetch(`${url}/ping`, { method: 'POST' });
       const body = await res.json();
 
       expect(res.status).toBe(200);
@@ -410,6 +419,8 @@ describe('standalone adapter', () => {
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
     }
+
+    close();
   });
 
   test('with void output', async () => {
@@ -421,7 +432,7 @@ describe('standalone adapter', () => {
         .query(() => undefined),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -438,12 +449,12 @@ describe('standalone adapter', () => {
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(0);
+
+    close();
   });
 
   test('with createContext', async () => {
-    interface Context {
-      id: 1234567890;
-    }
+    type Context = { id: 1234567890 };
 
     const t2 = initTRPC.meta<OpenApiMeta>().context<Context>().create();
 
@@ -455,23 +466,23 @@ describe('standalone adapter', () => {
         .query(({ input, ctx }) => ({ payload: input.payload, context: ctx })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       createContext: (): Context => ({ id: 1234567890 }),
       router: appRouter,
     });
 
-    const res = await fetch(`${url}/echo?payload=Mario`, { method: 'GET' });
+    const res = await fetch(`${url}/echo?payload=jlalmes`, { method: 'GET' });
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body).toEqual(
-      expect.objectContaining({
-        payload: 'Mario',
-        context: { id: 1234567890 },
-      }),
-    );
+    expect(body).toEqual({
+      payload: 'jlalmes',
+      context: { id: 1234567890 },
+    });
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(0);
+
+    close();
   });
 
   test('with responseMeta', async () => {
@@ -479,26 +490,28 @@ describe('standalone adapter', () => {
       echo: t.procedure
         .meta({ openapi: { method: 'GET', path: '/echo' } })
         .input(z.object({ payload: z.string() }))
-        .output(z.object({ payload: z.string() }))
-        .query(({ input }) => ({ payload: input.payload })),
+        .output(z.object({ payload: z.string(), context: z.undefined() }))
+        .query(({ input, ctx }) => ({ payload: input.payload, context: ctx })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
       responseMeta: () => ({ status: 202, headers: { 'x-custom': 'custom header' } }),
     });
 
-    const res = await fetch(`${url}/echo?payload=Mario`, { method: 'GET' });
+    const res = await fetch(`${url}/echo?payload=jlalmes`, { method: 'GET' });
     const body = await res.json();
 
     expect(res.status).toBe(202);
     expect(res.headers.get('x-custom')).toBe('custom header');
     expect(body).toEqual({
-      payload: 'Mario',
+      payload: 'jlalmes',
       context: undefined,
     });
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(0);
+
+    close();
   });
 
   test('with skipped transformer', async () => {
@@ -510,30 +523,32 @@ describe('standalone adapter', () => {
       echo: t2.procedure
         .meta({ openapi: { method: 'GET', path: '/echo' } })
         .input(z.object({ payload: z.string() }))
-        .output(z.object({ payload: z.string() }))
-        .query(({ input }) => ({ payload: input.payload })),
+        .output(z.object({ payload: z.string(), context: z.undefined() }))
+        .query(({ input, ctx }) => ({ payload: input.payload })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
-    const res = await fetch(`${url}/echo?payload=Mario`, { method: 'GET' });
+    const res = await fetch(`${url}/echo?payload=jlalmes`, { method: 'GET' });
     const body = await res.json();
 
     expect(res.status).toBe(200);
     expect(body).toEqual({
-      payload: 'Mario',
+      payload: 'jlalmes',
     });
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(0);
+
+    close();
   });
 
   test('with warmup request', async () => {
     const appRouter = t.router({});
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -543,6 +558,8 @@ describe('standalone adapter', () => {
     expect(createContextMock).toHaveBeenCalledTimes(0);
     expect(responseMetaMock).toHaveBeenCalledTimes(0);
     expect(onErrorMock).toHaveBeenCalledTimes(0);
+
+    close();
   });
 
   test('with invalid json', async () => {
@@ -554,7 +571,7 @@ describe('standalone adapter', () => {
         .mutation(({ input }) => ({ payload: input.payload })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -562,20 +579,20 @@ describe('standalone adapter', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // @ts-expect-error - not JSON.stringified
-      body: { payload: 'Lily' },
+      body: { payload: 'James' },
     });
     const body = (await res.json()) as OpenApiErrorResponse;
 
-    expect(res.status).toBe(500);
-    expect(body).toEqual(
-      expect.objectContaining({
-        message: 'Internal server error',
-        code: 'INTERNAL_SERVER_ERROR',
-      }),
-    );
+    expect(res.status).toBe(400);
+    expect(body).toEqual({
+      message: 'Failed to parse request body',
+      code: 'PARSE_ERROR',
+    });
     expect(createContextMock).toHaveBeenCalledTimes(0);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(1);
+
+    close();
   });
 
   test('with maxBodySize', async () => {
@@ -587,9 +604,9 @@ describe('standalone adapter', () => {
         .mutation(({ input }) => ({ payload: input.payload })),
     });
 
-    const requestBody = JSON.stringify({ payload: 'Lily' });
+    const requestBody = JSON.stringify({ payload: 'James' });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
       maxBodySize: requestBody.length,
     });
@@ -604,7 +621,7 @@ describe('standalone adapter', () => {
 
       expect(res.status).toBe(200);
       expect(body).toEqual({
-        payload: 'Lily',
+        payload: 'James',
       });
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
@@ -616,21 +633,21 @@ describe('standalone adapter', () => {
       const res = await fetch(`${url}/echo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload: 'Lily!' }),
+        body: JSON.stringify({ payload: 'James!' }),
       });
       const body = (await res.json()) as OpenApiErrorResponse;
 
       expect(res.status).toBe(413);
-      expect(body).toEqual(
-        expect.objectContaining({
-          message: 'PAYLOAD_TOO_LARGE',
-          code: 'PAYLOAD_TOO_LARGE',
-        }),
-      );
+      expect(body).toEqual({
+        message: 'Request body too large',
+        code: 'PAYLOAD_TOO_LARGE',
+      });
       expect(createContextMock).toHaveBeenCalledTimes(0);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(1);
     }
+
+    close();
   });
 
   test('with multiple input query string params', async () => {
@@ -642,58 +659,22 @@ describe('standalone adapter', () => {
         .query(({ input }) => ({ greeting: `Hello ${input.name}!` })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
     {
-      const res = await fetch(`${url}/say-hello?name=Lily&name=Mario`, { method: 'GET' });
-      const body = await res.json();
-
-      expect(res.status).toBe(400);
-      expect(body).toEqual(
-        expect.objectContaining({
-          message: 'Input validation failed',
-          code: 'BAD_REQUEST',
-          issues: [
-            {
-              code: 'invalid_type',
-              expected: 'string',
-              message: 'Invalid input: expected string, received array',
-              path: ['name'],
-            },
-          ],
-        }),
-      );
-      expect(createContextMock).toHaveBeenCalledTimes(1);
-      expect(responseMetaMock).toHaveBeenCalledTimes(1);
-      expect(onErrorMock).toHaveBeenCalledTimes(1);
-    }
-  });
-
-  test('with array input query string params', async () => {
-    const appRouter = t.router({
-      sayHello: t.procedure
-        .meta({ openapi: { method: 'GET', path: '/say-hello' } })
-        .input(z.object({ name: z.array(z.string()) }))
-        .output(z.object({ greeting: z.string() }))
-        .query(({ input }) => ({ greeting: `Hello ${input.name.join(', ')}!` })),
-    });
-
-    const { url } = createHttpServerWithRouter({
-      router: appRouter,
-    });
-
-    {
-      const res = await fetch(`${url}/say-hello?name=Lily&name=Mario`, { method: 'GET' });
+      const res = await fetch(`${url}/say-hello?name=James&name=jlalmes`, { method: 'GET' });
       const body = await res.json();
 
       expect(res.status).toBe(200);
-      expect(body).toEqual({ greeting: 'Hello Lily, Mario!' });
+      expect(body).toEqual({ greeting: 'Hello James!' });
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
     }
+
+    close();
   });
 
   test('with case insensitivity', async () => {
@@ -710,16 +691,16 @@ describe('standalone adapter', () => {
         .query(({ input }) => ({ greeting: `Hello ${input.name}!` })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
     {
-      const res = await fetch(`${url}/LOWER?name=Lily`, { method: 'GET' });
+      const res = await fetch(`${url}/LOWER?name=James`, { method: 'GET' });
       const body = await res.json();
 
       expect(res.status).toBe(200);
-      expect(body).toEqual({ greeting: 'Hello Lily!' });
+      expect(body).toEqual({ greeting: 'Hello James!' });
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
@@ -727,15 +708,17 @@ describe('standalone adapter', () => {
       clearMocks();
     }
     {
-      const res = await fetch(`${url}/upper?name=Lily`, { method: 'GET' });
+      const res = await fetch(`${url}/upper?name=James`, { method: 'GET' });
       const body = await res.json();
 
       expect(res.status).toBe(200);
-      expect(body).toEqual({ greeting: 'Hello Lily!' });
+      expect(body).toEqual({ greeting: 'Hello James!' });
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
     }
+
+    close();
   });
 
   test('with path parameters', async () => {
@@ -765,16 +748,16 @@ describe('standalone adapter', () => {
         })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
     {
-      const res = await fetch(`${url}/say-hello/Lily`, { method: 'GET' });
+      const res = await fetch(`${url}/say-hello/James`, { method: 'GET' });
       const body = await res.json();
 
       expect(res.status).toBe(200);
-      expect(body).toEqual({ greeting: 'Hello Lily!' });
+      expect(body).toEqual({ greeting: 'Hello James!' });
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
@@ -782,15 +765,15 @@ describe('standalone adapter', () => {
       clearMocks();
     }
     {
-      const res = await fetch(`${url}/say-hello/Lily`, {
+      const res = await fetch(`${url}/say-hello/James`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Mario' }),
+        body: JSON.stringify({ name: 'jlalmes' }),
       });
       const body = await res.json();
 
       expect(res.status).toBe(200);
-      expect(body).toEqual({ greeting: 'Hello Lily!' });
+      expect(body).toEqual({ greeting: 'Hello James!' });
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
@@ -798,17 +781,19 @@ describe('standalone adapter', () => {
       clearMocks();
     }
     {
-      const res = await fetch(`${url}/say-hello/Lily/Rose?greeting=Hello&first=Mario`, {
+      const res = await fetch(`${url}/say-hello/James/Berry?greeting=Hello&first=jlalmes`, {
         method: 'GET',
       });
       const body = await res.json();
 
       expect(res.status).toBe(200);
-      expect(body).toEqual({ greeting: 'Hello Lily Rose!' });
+      expect(body).toEqual({ greeting: 'Hello James Berry!' });
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
     }
+
+    close();
   });
 
   test('with bad output', async () => {
@@ -821,7 +806,7 @@ describe('standalone adapter', () => {
         .query(() => ({})),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -829,15 +814,15 @@ describe('standalone adapter', () => {
     const body = (await res.json()) as OpenApiErrorResponse;
 
     expect(res.status).toBe(500);
-    expect(body).toEqual(
-      expect.objectContaining({
-        message: 'Output validation failed',
-        code: 'INTERNAL_SERVER_ERROR',
-      }),
-    );
+    expect(body).toEqual({
+      message: 'Output validation failed',
+      code: 'INTERNAL_SERVER_ERROR',
+    });
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(1);
+
+    close();
   });
 
   test('with void and trpc client', async () => {
@@ -855,12 +840,12 @@ describe('standalone adapter', () => {
         .mutation(({ input }) => ({ payload: input })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
     type AppRouter = typeof appRouter;
-    const client = createTRPCClient<AppRouter>({
+    const client = createTRPCProxyClient<AppRouter>({
       links: [httpBatchLink({ url: `${url}/trpc` })],
     });
 
@@ -880,10 +865,11 @@ describe('standalone adapter', () => {
       }).rejects.toThrowErrorMatchingInlineSnapshot(`
       "[
         {
-          \\"expected\\": \\"void\\",
           \\"code\\": \\"invalid_type\\",
+          \\"expected\\": \\"void\\",
+          \\"received\\": \\"object\\",
           \\"path\\": [],
-          \\"message\\": \\"Invalid input: expected void, received object\\"
+          \\"message\\": \\"Expected void, received object\\"
         }
       ]"
       `);
@@ -909,10 +895,11 @@ describe('standalone adapter', () => {
       }).rejects.toThrowErrorMatchingInlineSnapshot(`
         "[
           {
-            \\"expected\\": \\"void\\",
             \\"code\\": \\"invalid_type\\",
+            \\"expected\\": \\"void\\",
+            \\"received\\": \\"object\\",
             \\"path\\": [],
-            \\"message\\": \\"Invalid input: expected void, received Object\\"
+            \\"message\\": \\"Expected void, received object\\"
           }
         ]"
       `);
@@ -920,6 +907,8 @@ describe('standalone adapter', () => {
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(1);
     }
+
+    close();
   });
 
   test('with DELETE mutation', async () => {
@@ -931,21 +920,20 @@ describe('standalone adapter', () => {
         .mutation(({ input }) => input),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
-    const res = await fetch(`${url}/echo-delete?payload=Mario`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const res = await fetch(`${url}/echo-delete?payload=jlalmes`, { method: 'DELETE' });
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ payload: 'Mario' });
+    expect(body).toEqual({ payload: 'jlalmes' });
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(0);
+
+    close();
   });
 
   test('with POST query', async () => {
@@ -957,22 +945,24 @@ describe('standalone adapter', () => {
         .query(({ input }) => input),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
     const res = await fetch(`${url}/echo-post`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ payload: 'Mario' }),
+      body: JSON.stringify({ payload: 'jlalmes' }),
     });
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ payload: 'Mario' });
+    expect(body).toEqual({ payload: 'jlalmes' });
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(0);
+
+    close();
   });
 
   test('with thrown error', async () => {
@@ -996,24 +986,19 @@ describe('standalone adapter', () => {
         }),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
     {
-      const res = await fetch(`${url}/custom-error`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const res = await fetch(`${url}/custom-error`, { method: 'POST' });
       const body = (await res.json()) as OpenApiErrorResponse;
 
       expect(res.status).toBe(500);
-      expect(body).toEqual(
-        expect.objectContaining({
-          message: 'Custom error message',
-          code: 'INTERNAL_SERVER_ERROR',
-        }),
-      );
+      expect(body).toEqual({
+        message: 'Custom error message',
+        code: 'INTERNAL_SERVER_ERROR',
+      });
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(1);
@@ -1021,23 +1006,20 @@ describe('standalone adapter', () => {
       clearMocks();
     }
     {
-      const res = await fetch(`${url}/custom-trpc-error`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const res = await fetch(`${url}/custom-trpc-error`, { method: 'POST' });
       const body = (await res.json()) as OpenApiErrorResponse;
 
       expect(res.status).toBe(499);
-      expect(body).toEqual(
-        expect.objectContaining({
-          message: 'Custom TRPCError message',
-          code: 'CLIENT_CLOSED_REQUEST',
-        }),
-      );
+      expect(body).toEqual({
+        message: 'Custom TRPCError message',
+        code: 'CLIENT_CLOSED_REQUEST',
+      });
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(1);
     }
+
+    close();
   });
 
   test('with error formatter', async () => {
@@ -1066,27 +1048,24 @@ describe('standalone adapter', () => {
         }),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
-    const res = await fetch(`${url}/custom-formatted-error`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const res = await fetch(`${url}/custom-formatted-error`, { method: 'POST' });
     const body = (await res.json()) as OpenApiErrorResponse;
 
     expect(res.status).toBe(500);
-    expect(body).toEqual(
-      expect.objectContaining({
-        message: 'Custom formatted error message',
-        code: 'INTERNAL_SERVER_ERROR',
-      }),
-    );
+    expect(body).toEqual({
+      message: 'Custom formatted error message',
+      code: 'INTERNAL_SERVER_ERROR',
+    });
     expect(errorFormatterMock).toHaveBeenCalledTimes(1);
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(1);
+
+    close();
   });
 
   test('with nested routers', async () => {
@@ -1112,7 +1091,7 @@ describe('standalone adapter', () => {
       }),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -1150,6 +1129,8 @@ describe('standalone adapter', () => {
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
     }
+
+    close();
   });
 
   test('with multiple inputs', async () => {
@@ -1162,18 +1143,20 @@ describe('standalone adapter', () => {
         .query(({ input }) => ({ fullName: `${input.firstName} ${input.lastName}` })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
-    const res = await fetch(`${url}/multi-input?firstName=Lily&lastName=Rose`, { method: 'GET' });
+    const res = await fetch(`${url}/multi-input?firstName=James&lastName=Berry`, { method: 'GET' });
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ fullName: 'Lily Rose' });
+    expect(body).toEqual({ fullName: 'James Berry' });
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(0);
+
+    close();
   });
 
   test('with preprocess', async () => {
@@ -1189,7 +1172,7 @@ describe('standalone adapter', () => {
         .query(({ input }) => ({ result: input.value.join('XXX') })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -1201,12 +1184,15 @@ describe('standalone adapter', () => {
     expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
     expect(onErrorMock).toHaveBeenCalledTimes(0);
+
+    close();
   });
 
   test('with non-coerce preprocess', async () => {
     // only applies when zod does not support (below version v3.20.0)
 
     // @ts-expect-error - hack to disable zodSupportsCoerce
+    // eslint-disable-next-line import/namespace
     zodUtils.zodSupportsCoerce = false;
     {
       const appRouter = t.router({
@@ -1224,7 +1210,7 @@ describe('standalone adapter', () => {
           .query(({ input }) => ({ result: input.number + 1 })),
       });
 
-      const { url } = createHttpServerWithRouter({
+      const { url, close } = createHttpServerWithRouter({
         router: appRouter,
       });
 
@@ -1236,8 +1222,11 @@ describe('standalone adapter', () => {
       expect(createContextMock).toHaveBeenCalledTimes(1);
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
+
+      close();
     }
     // @ts-expect-error - hack to re-enable zodSupportsCoerce
+    // eslint-disable-next-line import/namespace
     zodUtils.zodSupportsCoerce = true;
   });
 
@@ -1260,7 +1249,7 @@ describe('standalone adapter', () => {
         .query(({ input }) => ({ result: input.number + 1 })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -1305,6 +1294,8 @@ describe('standalone adapter', () => {
       expect(responseMetaMock).toHaveBeenCalledTimes(1);
       expect(onErrorMock).toHaveBeenCalledTimes(0);
     }
+
+    close();
   });
 
   test('with x-www-form-urlencoded', async () => {
@@ -1322,7 +1313,7 @@ describe('standalone adapter', () => {
         .query(({ input }) => ({ result: input.payload.join(' ') })),
     });
 
-    const { url } = createHttpServerWithRouter({
+    const { url, close } = createHttpServerWithRouter({
       router: appRouter,
     });
 
@@ -1333,10 +1324,12 @@ describe('standalone adapter', () => {
     });
     const body = await res.json();
 
-    expect(res.status).toBe(415);
-    expect(body).toEqual(expect.objectContaining({ code: 'UNSUPPORTED_MEDIA_TYPE' }));
-    expect(createContextMock).toHaveBeenCalledTimes(0);
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ result: 'Hello World' });
+    expect(createContextMock).toHaveBeenCalledTimes(1);
     expect(responseMetaMock).toHaveBeenCalledTimes(1);
-    expect(onErrorMock).toHaveBeenCalledTimes(1);
+    expect(onErrorMock).toHaveBeenCalledTimes(0);
+
+    close();
   });
 });

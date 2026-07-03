@@ -15,9 +15,9 @@ export const database: { users: User[]; posts: Post[] } = {
   users: [
     {
       id: '3dcb4a1f-0c91-42c5-834f-26d227c532e2',
-      email: 'lily@example.com',
+      email: 'jb@jamesbe.com',
       passcode: 1234,
-      name: 'Lily',
+      name: 'James',
     },
     {
       id: 'ea120573-2eb4-495e-be48-1b2debac2640',

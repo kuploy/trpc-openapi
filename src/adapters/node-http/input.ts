@@ -1,10 +1,9 @@
-import { Readable } from 'stream';
 import { TRPCError } from '@trpc/server';
+import { NodeHTTPRequest } from '@trpc/server/dist/adapters/node-http';
 import parse from 'co-body';
-import { NodeHTTPRequest } from '../../types';
 
-export const getQuery = (req: NodeHTTPRequest, url: URL): Record<string, string | string[]> => {
-  const query: Record<string, string | string[]> = {};
+export const getQuery = (req: NodeHTTPRequest, url: URL): Record<string, string> => {
+  const query: Record<string, string> = {};
 
   if (!req.query) {
     const parsedQs: Record<string, string[]> = {};
@@ -12,30 +11,31 @@ export const getQuery = (req: NodeHTTPRequest, url: URL): Record<string, string 
       if (!parsedQs[key]) {
         parsedQs[key] = [];
       }
-      parsedQs[key].push(value);
+      parsedQs[key]!.push(value);
     });
     req.query = parsedQs;
   }
 
-  const reqQuery = req.query as typeof query;
-
   // normalize first value in array
-  Object.keys(reqQuery).forEach((key) => {
-    const value = reqQuery[key];
+  Object.keys(req.query).forEach((key) => {
+    const value = req.query![key];
     if (value) {
-      query[key] = Array.isArray(value) && value.length === 1 ? value[0]! : value;
+      if (typeof value === 'string') {
+        query[key] = value;
+      } else if (Array.isArray(value)) {
+        if (typeof value[0] === 'string') {
+          query[key] = value[0];
+        }
+      }
     }
   });
 
   return query;
 };
 
-const BODY_100_KB = 100_000;
+const BODY_100_KB = 100000;
 export const getBody = async (req: NodeHTTPRequest, maxBodySize = BODY_100_KB): Promise<any> => {
   if ('body' in req) {
-    if (req.body instanceof ReadableStream) {
-      return new Response(req.body as ReadableStream<Buffer | Uint8Array | string | null>).json();
-    }
     return req.body;
   }
 
@@ -73,21 +73,4 @@ export const getBody = async (req: NodeHTTPRequest, maxBodySize = BODY_100_KB): 
   }
 
   return req.body;
-};
-
-export const getMultipartBody = async (req: NodeHTTPRequest): Promise<FormData> => {
-  const contentType = req.headers['content-type'];
-  if (!contentType) {
-    throw new TRPCError({
-      message: 'Missing content-type header',
-      code: 'BAD_REQUEST',
-    });
-  }
-
-  const readable = Readable.toWeb(req as unknown as Readable) as ReadableStream;
-  const response = new Response(readable, {
-    headers: { 'content-type': contentType },
-  });
-
-  return response.formData();
 };
