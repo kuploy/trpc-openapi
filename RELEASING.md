@@ -2,9 +2,22 @@
 
 This package is published to **GitHub Packages** (`npm.pkg.github.com`,
 `@kuploy` scope) by the `Publish to GitHub Packages` workflow
-(`.github/workflows/publish.yml`). CI authenticates with the workflow's
-`GITHUB_TOKEN` (requires the org/repo Actions **Workflow permissions** to be
-set to *Read and write*), so no PAT/`.npmrc` handling is needed.
+(`.github/workflows/publish.yml`).
+
+## Auth
+
+`GITHUB_TOKEN` **cannot create a brand-new package in an organization** — the
+first publish of a package that doesn't exist yet 403s with
+`permission_denied: write_package`, regardless of Actions workflow
+permissions or package visibility. So:
+
+- **First publish:** authenticate with a PAT (`write:packages`) provided as
+  the `PACKAGES_PAT` repo secret. Publishing from this repo's workflow
+  auto-links the new package to the repo.
+- **After that:** the package exists and is repo-linked, so `GITHUB_TOKEN`
+  (with `packages: write` and Actions *Read and write* permissions) can
+  publish subsequent versions. The workflow can then be switched back to
+  `GITHUB_TOKEN` and the `PACKAGES_PAT` secret removed.
 
 ## How to publish
 
