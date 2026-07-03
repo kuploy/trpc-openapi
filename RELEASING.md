@@ -3,7 +3,7 @@
 This package is published to **GitHub Packages** (`npm.pkg.github.com`,
 `@kuploy` scope) by the `Publish to GitHub Packages` workflow
 (`.github/workflows/publish.yml`). CI authenticates with the workflow's
-`GITHUB_TOKEN` (requires the repo's Actions **Workflow permissions** to be
+`GITHUB_TOKEN` (requires the org/repo Actions **Workflow permissions** to be
 set to *Read and write*), so no PAT/`.npmrc` handling is needed.
 
 ## How to publish
