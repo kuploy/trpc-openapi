@@ -1,9 +1,11 @@
-# [**`trpc-to-openapi`**](../../README.md) (with-express)
+# [**`trpc-openapi`**](../../README.md) (with-express)
 
 ### Getting started
 
+Make sure your current working directory is at `/trpc-openapi` root.
+
 ```bash
-pnpm install
-pnpm run build
-pnpm run dev -w with-express
+npm install
+npm run build
+npm run dev -w with-express
 ```
