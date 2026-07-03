@@ -7,11 +7,11 @@ name: Publish to GitHub Packages
 #     (an escape hatch for environments where tag pushes / dispatch are
 #     unavailable; ordinary main pushes without the marker stay inert).
 #
-# Auth: the publish uses a PAT secret PACKAGES_PAT (scope: write:packages).
-# GITHUB_TOKEN cannot create a NEW package in an organization (first publish
-# 403s with permission_denied: write_package), so a PAT is required at least
-# for the initial publish. Consumers (kuploy, kuploy-cloud) install it from
-# the @kuploy-scoped GitHub Packages registry with a read:packages token.
+# Auth: GITHUB_TOKEN (packages: write). The package already exists and is
+# linked to this repo (the first publish, 0.0.6, ran from this workflow with a
+# PACKAGES_PAT because GITHUB_TOKEN cannot *create* a new org package), so
+# GITHUB_TOKEN now covers subsequent publishes. Consumers install from the
+# @kuploy-scoped GitHub Packages registry with a read:packages token.
 on:
   push:
     branches: ["main"]
@@ -43,4 +43,4 @@ jobs:
       - run: pnpm run build
       - run: pnpm publish --no-git-checks
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_PAT }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
