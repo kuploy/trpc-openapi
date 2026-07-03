@@ -6,7 +6,7 @@
   "private": false,
   "license": "MIT",
   "publishConfig": {
-    "access": "restricted",
+    "access": "public",
     "registry": "https://npm.pkg.github.com"
   },
   "keywords": ["trpc", "openapi", "swagger"],
