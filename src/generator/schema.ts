@@ -2,7 +2,6 @@
 import { TRPCError } from "@trpc/server";
 import { OpenAPIV3 } from "openapi-types";
 import { z } from "zod";
-import zodToJsonSchema from "zod-to-json-schema";
 
 import { OpenApiContentType } from "../types";
 import {
@@ -19,10 +18,26 @@ import {
 const zodSchemaToOpenApiSchemaObject = (
 	zodSchema: z.ZodType,
 ): OpenAPIV3.SchemaObject => {
-	// FIXME: https://github.com/StefanTerdell/zod-to-json-schema/issues/35
-	return zodToJsonSchema(zodSchema, {
-		target: "openApi3",
-		$refStrategy: "none",
+	/*
+	 * Zod 4's own converter, not the zod-to-json-schema package.
+	 *
+	 * That package is a Zod 3 library. Handed a Zod 4 schema it does not throw —
+	 * it returns `{"$schema": "...draft-07..."}` and nothing else, so every
+	 * parameter and body in the generated document came out as `schema: {}`.
+	 * A structurally valid OpenAPI document describing nothing is worse than a
+	 * failure, because nothing surfaces it.
+	 *
+	 * Option mapping from the old call: `target: "openApi3"` -> "openapi-3.0"
+	 * (both drop the $schema key), and `$refStrategy: "none"` -> `reused:
+	 * "inline"` (both inline a shared subschema instead of emitting a $ref).
+	 * `unrepresentable: "any"` keeps the old library's permissiveness: Zod 4
+	 * throws by default on types with no JSON Schema form, and this generator
+	 * feeds it z.void() for parameterless procedures.
+	 */
+	return z.toJSONSchema(zodSchema, {
+		target: "openapi-3.0",
+		reused: "inline",
+		unrepresentable: "any",
 	}) as any;
 };
 
