@@ -1,0 +1,56 @@
+name: CI
+
+# Builds the package on every PR and on pushes to main.
+#
+# There was no CI here at all: nothing triggered on pull_request, and
+# publish.yml never ran a build or a test before publishing. So a change that
+# did not compile could reach GitHub Packages, and `kuploy` and `kuploy-cloud`
+# would find out on their next install.
+#
+# BUILD ONLY, DELIBERATELY. `pnpm test` is `tsc --noEmit && jest`, and it does
+# not pass on main today: the package is mid-migration between Zod majors.
+# `peerDependencies` declares zod ^3.14.4, `devDependencies` installs ^4.3.6,
+# and the source is half-converted — src/generator/schema.ts still calls Zod 3's
+# schema.isOptional(), which Zod 4 removed. Measured on main:
+#
+#   with zod 4 (as locked): build passes, tsc fails on 2 test files, 45/52 tests fail
+#   with zod 3 (as peered): tsc passes after 3 small source fixes, 70/86 tests fail
+#
+# Neither major works end to end. Wiring `test` in now would land a permanently
+# red required check and teach everyone to ignore it. `build` is green today and
+# is the thing that protects consumers, so it goes in first; `test` follows once
+# the Zod target is decided.
+#
+# Not urgent for consumers: kuploy and kuploy-cloud both pin zod ^3.25.32 and
+# the published 0.0.6 works for them. It blocks developing this package, not
+# using it.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+      # Frozen: the lockfile is in sync on main and drift should fail here
+      # rather than be silently resolved away, which is what publish.yml's
+      # `--no-frozen-lockfile` allows today.
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
