@@ -1291,7 +1291,10 @@ describe("standalone adapter", () => {
     // @ts-expect-error - hack to disable zodSupportsCoerce
     // eslint-disable-next-line import/namespace
     zodUtils.zodSupportsCoerce = false;
-    {
+    // try/finally: without it a failure inside the block skips the restore
+    // below and leaks zodSupportsCoerce = false into every later test in this
+    // file, which is what made "with coerce" fail as collateral damage.
+    try {
       const appRouter = t.router({
         plusOne: t.procedure
           .meta({
@@ -1323,10 +1326,11 @@ describe("standalone adapter", () => {
       expect(onErrorMock).toHaveBeenCalledTimes(0);
 
       close();
+    } finally {
+      // @ts-expect-error - hack to re-enable zodSupportsCoerce
+      // eslint-disable-next-line import/namespace
+      zodUtils.zodSupportsCoerce = true;
     }
-    // @ts-expect-error - hack to re-enable zodSupportsCoerce
-    // eslint-disable-next-line import/namespace
-    zodUtils.zodSupportsCoerce = true;
   });
 
   test("with coerce", async () => {
