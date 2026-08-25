@@ -73,15 +73,28 @@ export const unwrapZodType = (
     case "lazy":
       return unwrapZodType(def.getter(), unwrapPreprocess);
 
+    /*
+     * Zod 4 folds .transform() and .preprocess() into one node, ZodPipe, whose
+     * def carries `in`/`out` — there is no `def.schema`, so the previous branch
+     * silently unwrapped to undefined and every transformed or preprocessed
+     * query parameter was rejected as non-coercible.
+     *
+     * The two are told apart by which side holds the transform:
+     *   z.string().transform(fn)    in = string,    out = transform
+     *   z.preprocess(fn, z.string()) in = transform, out = string
+     *
+     * For a transform the source type is `in` — that is what a request must
+     * actually supply. For a preprocess it is `out`, and only when the caller
+     * asked to see through it, matching the old unwrapPreprocess contract.
+     */
     case "transform":
-    case "pipe":
-      return unwrapZodType(def.schema, unwrapPreprocess);
-
-    case "preprocess":
-      if (unwrapPreprocess) {
-        return unwrapZodType(def.schema, unwrapPreprocess);
+    case "pipe": {
+      const isPreprocess = (def.in as any)?._zod?.def?.type === "transform";
+      if (isPreprocess) {
+        return unwrapPreprocess ? unwrapZodType(def.out, unwrapPreprocess) : type;
       }
-      return type;
+      return unwrapZodType(def.in, unwrapPreprocess);
+    }
 
     default:
       return type;
@@ -167,7 +180,13 @@ export const instanceofZodTypeCoercible = (
   const type = unwrapZodType(_type, false);
   const def = (type as any)?._zod?.def?.type;
 
+  /*
+   * "string" was missing, though the error raised on failure says the key
+   * "must be ZodString, ZodNumber, ZodBoolean, ZodBigInt or ZodDate". A plain
+   * z.string() query parameter was rejected whenever coercion was enabled.
+   */
   return (
+    def === "string" ||
     def === "number" ||
     def === "boolean" ||
     def === "bigint" ||
