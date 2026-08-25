@@ -75,8 +75,20 @@ describe("standalone adapter", () => {
 
   // Please note: validating router does not happen in `production`.
   test("with invalid router", () => {
-    const appRouter = t.router({
-      invalidRoute: t.procedure
+    /*
+     * Upstream required every exposed procedure to declare an output parser and
+     * threw when one was missing. This fork exposes every procedure by default
+     * (a route is derived from the procedure name unless `override` says
+     * otherwise), so an output-less procedure is ordinary and must still
+     * generate -- see the matching note in getRequestBodyObject.
+     *
+     * The guard itself is intact; it is scoped to a parser that is present but
+     * is not a Zod schema, which is the case that actually reaches the
+     * converter and fails there. Both halves are asserted so neither can
+     * regress unnoticed.
+     */
+    const noOutputParser = t.router({
+      noOutput: t.procedure
         .meta({
           openapi: { override: true, method: "GET", path: "/invalid-route" },
         })
@@ -86,7 +98,23 @@ describe("standalone adapter", () => {
 
     expect(() => {
       createOpenApiHttpHandler({
-        router: appRouter,
+        router: noOutputParser,
+      });
+    }).not.toThrow();
+
+    const nonZodOutputParser = t.router({
+      invalidRoute: t.procedure
+        .meta({
+          openapi: { override: true, method: "GET", path: "/invalid-route" },
+        })
+        .input(z.void())
+        .output(((value: any) => value) as any)
+        .query(() => "hello" as any),
+    });
+
+    expect(() => {
+      createOpenApiHttpHandler({
+        router: nonZodOutputParser,
       });
     }).toThrowError(
       "[query.invalidRoute] - Output parser expects a Zod validator"
