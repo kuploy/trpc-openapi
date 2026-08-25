@@ -19,10 +19,11 @@ export const getOpenApiPathsObject = (
 	securitySchemeNames: string[],
 ): OpenAPIV3.PathsObject => {
 	const pathsObject: OpenAPIV3.PathsObject = {};
+	const skipped: string[] = [];
 	const procedures = appRouter._def.procedures as OpenApiProcedureRecord;
 	forEachOpenApiProcedure(
 		procedures,
-		({ path: procedurePath, type, procedure, openapi }) => {
+		({ path: procedurePath, type, procedure, openapi, declared }) => {
 			const procedureName = `${type}.${procedurePath}`;
 
 			try {
@@ -117,10 +118,37 @@ export const getOpenApiPathsObject = (
 			} catch (error: any) {
 				// eslint-disable-next-line @typescript-eslint/restrict-template-expressions
 				error.message = `[${procedureName}] - ${error.message}`;
-				throw error;
+
+				/*
+				 * A route nobody asked for must not be able to destroy the whole
+				 * document. This fork exposes every procedure automatically, so a
+				 * single one with an input that has no HTTP representation — a
+				 * bare scalar, something only expressible as a body a GET cannot
+				 * carry — used to abort generation entirely. That is how this
+				 * repo went from a 383-path document to none at all.
+				 *
+				 * Declared routes still throw. If someone wrote openapi meta by
+				 * hand and it cannot be represented, that is a mistake in their
+				 * code and silence would be the wrong answer.
+				 *
+				 * Skips are collected and reported rather than swallowed: an
+				 * absent route you never hear about is the same failure mode as
+				 * the empty schemas this package shipped before.
+				 */
+				if (declared) throw error;
+				skipped.push(error.message);
 			}
 		},
 	);
+
+	if (skipped.length > 0) {
+		console.warn(
+			`[trpc-openapi] ${skipped.length} auto-exposed procedure(s) left out of the document ` +
+				`because their input has no HTTP representation. Give a procedure explicit ` +
+				`openapi meta to turn this into an error, or enabled: false to silence it.\n` +
+				skipped.map((m) => `  - ${m}`).join("\n"),
+		);
+	}
 
 	return pathsObject;
 };

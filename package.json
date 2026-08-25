@@ -1,6 +1,6 @@
 {
   "name": "@kuploy/trpc-openapi",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "tRPC OpenAPI \u2014 kuploy fork of @dokploy/trpc-openapi (tRPC v10 + `override` meta). Extracted from the kuploy monorepo (kuploy/kuploy#102).",
   "author": "kuploy",
   "private": false,
