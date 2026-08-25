@@ -6,7 +6,8 @@ import type {
 	NodeHTTPResponse,
 } from "@trpc/server/dist/adapters/node-http";
 import cloneDeep from "lodash.clonedeep";
-import type { ZodError, z } from "zod";
+import { z } from "zod";
+import type { ZodError } from "zod";
 
 import { generateOpenApiDocument } from "../../generator";
 import type {
@@ -29,6 +30,24 @@ import {
 import { TRPC_ERROR_CODE_HTTP_STATUS, getErrorFromUnknown } from "./errors";
 import { getBody, getQuery } from "./input";
 import { createProcedureCache } from "./procedures";
+
+/*
+ * Zod's own coercion, reachable as a value.
+ *
+ * Coercion used to be applied by flipping `_def.coerce` on the caller's schema,
+ * which mutated a schema this package does not own and never restored it. These
+ * stand-ins let the same conversion be applied to the *value* instead, so the
+ * schema is never touched. Using z.coerce.* rather than hand-rolled casts keeps
+ * the semantics identical to the old behaviour, quirks included -- notably
+ * z.coerce.boolean() is Boolean(value), so "false" is true.
+ */
+const VALUE_COERCERS: Record<string, z.ZodTypeAny> = {
+	string: z.coerce.string(),
+	number: z.coerce.number(),
+	boolean: z.coerce.boolean(),
+	bigint: z.coerce.bigint(),
+	date: z.coerce.date(),
+};
 
 export type CreateOpenApiNodeHttpHandlerOptions<
 	TRouter extends OpenApiRouter,
@@ -118,7 +137,8 @@ export const createOpenApiNodeHttpHandler = <
 			}
 
 			/*
-			 * Coercion, scoped by what the transport can actually carry.
+			 * Coercion, scoped by what the transport can actually carry, and
+			 * applied to the VALUE rather than to the schema.
 			 *
 			 * A query string is always text: `?n=123` must become a number
 			 * before z.number() will take it, so everything coercible is fair
@@ -126,7 +146,7 @@ export const createOpenApiNodeHttpHandler = <
 			 *
 			 * A JSON body is different. It already carries real types, so
 			 * coercing indiscriminately means POSTing {"payload": 123} to a
-			 * z.string() field silently becomes "123" and returns 200 — the API
+			 * z.string() field silently becomes "123" and returns 200 -- the API
 			 * accepting input its own schema rejects. But JSON cannot express
 			 * every type either: a Date arrives as a string and a BigInt as a
 			 * string or number, and those genuinely do need coercing.
@@ -135,41 +155,39 @@ export const createOpenApiNodeHttpHandler = <
 			 * string / number / boolean are left alone, and a mismatch there is
 			 * reported as the client error it is.
 			 *
-			 * KNOWN LIMITATION, deliberately not fixed here: this mutates the
-			 * caller's schema in place and never restores it, so a schema shared
-			 * between a GET and a POST route stays coerced for the body route
-			 * too, for the life of the process. Fixing that means building a
-			 * coerced clone per request rather than mutating.
+			 * Only keys the request actually sent are touched. Coercion has
+			 * nothing to convert for a key that never arrived, and marking one
+			 * coerced destroys the error: Zod 4 reports a coerced-but-missing
+			 * value as `expected: "nonoptional"` instead of naming the type the
+			 * client failed to send.
+			 *
+			 * `input` is built above from this request's query/body/path, so
+			 * rewriting it is local to this request. The previous approach set
+			 * `_def.coerce` on the caller's schema and never restored it, which
+			 * left a schema shared between a GET and a POST route coerced for
+			 * the body route too, for the life of the process -- silently
+			 * undoing the transport scoping this comment describes.
+			 *
+			 * A value that will not coerce is left exactly as it arrived, so the
+			 * procedure's own parser produces the authoritative error rather
+			 * than this adapter inventing one.
 			 */
 			const JSON_CANNOT_EXPRESS = new Set(["date", "bigint"]);
-			if (zodSupportsCoerce) {
+			if (zodSupportsCoerce && input !== undefined) {
 				if (instanceofZodTypeObject(unwrappedSchema)) {
 					Object.entries(unwrappedSchema.shape).forEach(
 						([shapeKey, shapeSchema]) => {
-							/*
-							 * Only coerce a key the request actually supplied.
-							 *
-							 * Coercion exists to turn a value that arrived as text into
-							 * the declared type. A key that did not arrive has nothing to
-							 * convert, and marking it coerced actively destroys the error:
-							 * Zod 4 reports a coerced-but-missing value as
-							 *   expected: "nonoptional"  ("Invalid input: expected
-							 *   nonoptional, received undefined")
-							 * instead of naming the type the client failed to send. Every
-							 * required query parameter on every GET route degraded to that
-							 * message, which says nothing a caller can act on.
-							 */
-							if (
-								input === undefined ||
-								!Object.prototype.hasOwnProperty.call(input, shapeKey)
-							) {
+							if (!Object.prototype.hasOwnProperty.call(input, shapeKey)) {
 								return;
 							}
 							const unwrappedShapeSchema = unwrapZodType(shapeSchema, false);
 							if (!instanceofZodTypeCoercible(unwrappedShapeSchema)) return;
 							const kind = (unwrappedShapeSchema as any)?._zod?.def?.type;
 							if (useBody && !JSON_CANNOT_EXPRESS.has(kind)) return;
-							unwrappedShapeSchema._def.coerce = true;
+							const coercer = VALUE_COERCERS[kind];
+							if (!coercer) return;
+							const coerced = coercer.safeParse(input[shapeKey]);
+							if (coerced.success) input[shapeKey] = coerced.data;
 						},
 					);
 				}

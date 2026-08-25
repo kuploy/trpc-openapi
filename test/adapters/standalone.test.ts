@@ -1437,6 +1437,65 @@ describe("standalone adapter", () => {
     close();
   });
 
+  test("with a schema shared between a query route and a body route", async () => {
+    /*
+     * Coercion is scoped by transport (#6): a query string coerces anything, a
+     * JSON body only what JSON cannot express. That scoping is per-request, so
+     * it must survive one route coercing a schema the other route also uses.
+     *
+     * Coercion used to be applied by setting `_def.coerce` on the schema and
+     * never unsetting it, so a single GET permanently coerced the shared
+     * z.number() and the POST route then accepted a body its own schema
+     * rejects -- the exact defect #6 fixed, reintroduced through the back door.
+     * Order matters here: the GET must run first for the leak to be visible.
+     */
+    const shared = z.object({ n: z.number() });
+
+    const appRouter = t.router({
+      getShared: t.procedure
+        .meta({ openapi: { override: true, method: "GET", path: "/shared" } })
+        .input(shared)
+        .output(z.object({ result: z.number() }))
+        .query(({ input }) => ({ result: input.n })),
+      postShared: t.procedure
+        .meta({ openapi: { override: true, method: "POST", path: "/shared" } })
+        .input(shared)
+        .output(z.object({ result: z.number() }))
+        .mutation(({ input }) => ({ result: input.n })),
+    });
+
+    const { url, close } = createHttpServerWithRouter({ router: appRouter });
+
+    {
+      // query: "9" is text and must coerce
+      const res = await fetch(`${url}/shared?n=9`, { method: "GET" });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ result: 9 });
+      clearMocks();
+    }
+    {
+      // body: JSON can express a number, so a string here is a client error
+      const res = await fetch(`${url}/shared`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ n: "9" }),
+      });
+      expect(res.status).toBe(400);
+      clearMocks();
+    }
+    {
+      // and a real number in the body still works
+      const res = await fetch(`${url}/shared`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ n: 9 }),
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ result: 9 });
+    }
+
+    close();
+  });
   test("with x-www-form-urlencoded", async () => {
     const appRouter = t.router({
       echo: t.procedure
