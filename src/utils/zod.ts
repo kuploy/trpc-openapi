@@ -70,6 +70,19 @@ export const unwrapZodType = (
     case "default":
       return unwrapZodType(def.innerType, unwrapPreprocess);
 
+    /*
+     * Transparent wrappers Zod 4 introduces or renames. `.required()` produces
+     * a "nonoptional" node, which is why an ordinary z.string().min(1) stopped
+     * unwrapping to a string the moment a schema used .pick().required() — it
+     * took out every apiFindOne* in kuploy. The other three have the same
+     * innerType shape and would have failed the same way.
+     */
+    case "nonoptional":
+    case "nullable":
+    case "readonly":
+    case "catch":
+      return unwrapZodType(def.innerType, unwrapPreprocess);
+
     case "lazy":
       return unwrapZodType(def.getter(), unwrapPreprocess);
 
