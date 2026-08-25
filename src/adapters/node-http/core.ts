@@ -144,13 +144,34 @@ export const createOpenApiNodeHttpHandler = <
 			const JSON_CANNOT_EXPRESS = new Set(["date", "bigint"]);
 			if (zodSupportsCoerce) {
 				if (instanceofZodTypeObject(unwrappedSchema)) {
-					Object.values(unwrappedSchema.shape).forEach((shapeSchema) => {
-						const unwrappedShapeSchema = unwrapZodType(shapeSchema, false);
-						if (!instanceofZodTypeCoercible(unwrappedShapeSchema)) return;
-						const kind = (unwrappedShapeSchema as any)?._zod?.def?.type;
-						if (useBody && !JSON_CANNOT_EXPRESS.has(kind)) return;
-						unwrappedShapeSchema._def.coerce = true;
-					});
+					Object.entries(unwrappedSchema.shape).forEach(
+						([shapeKey, shapeSchema]) => {
+							/*
+							 * Only coerce a key the request actually supplied.
+							 *
+							 * Coercion exists to turn a value that arrived as text into
+							 * the declared type. A key that did not arrive has nothing to
+							 * convert, and marking it coerced actively destroys the error:
+							 * Zod 4 reports a coerced-but-missing value as
+							 *   expected: "nonoptional"  ("Invalid input: expected
+							 *   nonoptional, received undefined")
+							 * instead of naming the type the client failed to send. Every
+							 * required query parameter on every GET route degraded to that
+							 * message, which says nothing a caller can act on.
+							 */
+							if (
+								input === undefined ||
+								!Object.prototype.hasOwnProperty.call(input, shapeKey)
+							) {
+								return;
+							}
+							const unwrappedShapeSchema = unwrapZodType(shapeSchema, false);
+							if (!instanceofZodTypeCoercible(unwrappedShapeSchema)) return;
+							const kind = (unwrappedShapeSchema as any)?._zod?.def?.type;
+							if (useBody && !JSON_CANNOT_EXPRESS.has(kind)) return;
+							unwrappedShapeSchema._def.coerce = true;
+						},
+					);
 				}
 			}
 
