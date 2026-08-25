@@ -113,72 +113,46 @@ describe("generator", () => {
     `);
   });
 
+  /*
+   * This fork exposes every procedure by default (see defaultOpenApiMeta in
+   * utils/procedure.ts), so a procedure with no input or no output parser is
+   * ordinary — an argument-less query is the common case. Upstream was opt-in
+   * and threw "expects a Zod validator" here; keeping that would make document
+   * generation fail for every such procedure rather than for a mistake.
+   *
+   * A parser that is PRESENT but not Zod is still an error — see
+   * "with non-zod parser".
+   */
   test("with missing input", () => {
-    {
-      const appRouter = t.router({
-        noInput: t.procedure
-          .meta({
-            openapi: { override: true, method: "GET", path: "/no-input" },
-          })
-          .output(z.object({ name: z.string() }))
-          .query(() => ({ name: "jlalmes" })),
-      });
+    const appRouter = t.router({
+      noInput: t.procedure
+        .meta({
+          openapi: { override: true, method: "GET", path: "/no-input" },
+        })
+        .output(z.object({ name: z.string() }))
+        .query(() => ({ name: "jlalmes" })),
+    });
 
-      expect(() => {
-        generateOpenApiDocument(appRouter, defaultDocOpts);
-      }).toThrowError("[query.noInput] - Input parser expects a Zod validator");
-    }
-    {
-      const appRouter = t.router({
-        noInput: t.procedure
-          .meta({
-            openapi: { override: true, method: "POST", path: "/no-input" },
-          })
-          .output(z.object({ name: z.string() }))
-          .mutation(() => ({ name: "jlalmes" })),
-      });
-
-      expect(() => {
-        generateOpenApiDocument(appRouter, defaultDocOpts);
-      }).toThrowError(
-        "[mutation.noInput] - Input parser expects a Zod validator"
-      );
-    }
+    const doc = generateOpenApiDocument(appRouter, defaultDocOpts);
+    expect(doc.paths["/no-input"]!.get!.parameters).toEqual([]);
+    expect(doc.paths["/no-input"]!.get!.responses[200]).toBeDefined();
   });
 
   test("with missing output", () => {
-    {
-      const appRouter = t.router({
-        noOutput: t.procedure
-          .meta({
-            openapi: { override: true, method: "GET", path: "/no-output" },
-          })
-          .input(z.object({ name: z.string() }))
-          .query(({ input }) => ({ name: input.name })),
-      });
+    const appRouter = t.router({
+      noOutput: t.procedure
+        .meta({
+          openapi: { override: true, method: "GET", path: "/no-output" },
+        })
+        .input(z.object({ name: z.string() }))
+        .query(({ input }) => ({ name: input.name })),
+    });
 
-      expect(() => {
-        generateOpenApiDocument(appRouter, defaultDocOpts);
-      }).toThrowError(
-        "[query.noOutput] - Output parser expects a Zod validator"
-      );
-    }
-    {
-      const appRouter = t.router({
-        noOutput: t.procedure
-          .meta({
-            openapi: { override: true, method: "POST", path: "/no-output" },
-          })
-          .input(z.object({ name: z.string() }))
-          .mutation(({ input }) => ({ name: input.name })),
-      });
-
-      expect(() => {
-        generateOpenApiDocument(appRouter, defaultDocOpts);
-      }).toThrowError(
-        "[mutation.noOutput] - Output parser expects a Zod validator"
-      );
-    }
+    const doc = generateOpenApiDocument(appRouter, defaultDocOpts);
+    const params = doc.paths["/no-output"]!.get!.parameters!;
+    expect(params).toHaveLength(1);
+    expect((params[0] as any).name).toBe("name");
+    expect(doc.paths["/no-output"]!.get!.responses[200]).toBeDefined();
   });
 
   test("with non-zod parser", () => {

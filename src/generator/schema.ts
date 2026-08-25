@@ -47,6 +47,16 @@ export const getParameterObjects = (
 	inType: "all" | "path" | "query",
 	example: Record<string, any> | undefined,
 ): OpenAPIV3.ParameterObject[] | undefined => {
+	// Same rule as getRequestBodyObject: a missing parser is fine (every
+	// procedure is exposed by default here, so argument-less queries are
+	// normal), a present-but-non-Zod one cannot be documented.
+	if (currentSchema !== undefined && !instanceofZodType(currentSchema)) {
+		throw new TRPCError({
+			message: "Input parser expects a Zod validator",
+			code: "INTERNAL_SERVER_ERROR",
+		});
+	}
+
 	const schema = currentSchema || z.void();
 	const isRequired = !schema.isOptional();
 	const unwrappedSchema = unwrapZodType(schema, true);
@@ -138,12 +148,25 @@ export const getRequestBodyObject = (
 	contentTypes: OpenApiContentType[],
 	example: Record<string, any> | undefined,
 ): OpenAPIV3.RequestBodyObject | undefined => {
-	// if (!instanceofZodType(schema)) {
-	// 	throw new TRPCError({
-	// 		message: "Input parser expects a Zod validator",
-	// 		code: "INTERNAL_SERVER_ERROR",
-	// 	});
-	// }
+	/*
+	 * A parser that exists but is not Zod cannot be turned into a schema, and
+	 * emitting the route anyway is exactly the failure this package just spent
+	 * a release fixing: a document that looks valid and describes nothing.
+	 *
+	 * Tested against `currentSchema`, not the fallback below. `undefined` means
+	 * the procedure simply has no parser, which is normal here — this fork
+	 * exposes every procedure by default, so argument-less queries are common
+	 * and must keep generating. Only a present-but-non-Zod parser is an error.
+	 *
+	 * This guard was commented out rather than removed, because as written it
+	 * referenced `schema` above its own declaration and would not compile.
+	 */
+	if (currentSchema !== undefined && !instanceofZodType(currentSchema)) {
+		throw new TRPCError({
+			message: "Input parser expects a Zod validator",
+			code: "INTERNAL_SERVER_ERROR",
+		});
+	}
 
 	const schema = currentSchema || z.void();
 
@@ -173,7 +196,22 @@ export const getRequestBodyObject = (
 			delete dedupedExample[pathParameter];
 		}
 	});
-	const dedupedSchema = unwrappedSchema.omit(mask);
+	/*
+	 * Rebuilt from the shape rather than unwrappedSchema.omit(mask): Zod 4
+	 * throws ".omit() cannot be used on object schemas containing refinements",
+	 * so any procedure whose input object carries a .refine()/.superRefine()
+	 * AND has path parameters could not generate at all.
+	 *
+	 * Dropping the refinement here is correct rather than merely expedient — a
+	 * refinement is arbitrary code and has no JSON Schema representation, so it
+	 * was never going to appear in the document. Only the shape matters, and
+	 * the refinement still runs at request time where it belongs.
+	 */
+	const dedupedSchema = z.object(
+		Object.fromEntries(
+			Object.entries(unwrappedSchema.shape).filter(([key]) => !mask[key]),
+		) as z.ZodRawShape,
+	);
 
 	// if all keys are path parameters
 	if (
@@ -219,6 +257,16 @@ export const getResponsesObject = (
 		| Record<string, OpenAPIV3.HeaderObject | OpenAPIV3.ReferenceObject>
 		| undefined,
 ): OpenAPIV3.ResponsesObject => {
+	// Mirrors the input guard. Without it a non-Zod output parser reached the
+	// converter and failed with "Cannot read properties of undefined (reading
+	// 'def')", which says nothing about the actual mistake.
+	if (schema !== undefined && !instanceofZodType(schema)) {
+		throw new TRPCError({
+			message: "Output parser expects a Zod validator",
+			code: "INTERNAL_SERVER_ERROR",
+		});
+	}
+
 	const successResponseObject: OpenAPIV3.ResponseObject = {
 		description: "Successful response",
 		headers: headers,

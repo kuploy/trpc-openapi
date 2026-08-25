@@ -132,16 +132,25 @@ export const instanceofZodTypeLikeString = (
     case "string":
       return true;
 
+    /*
+     * Zod 4 shapes. A literal carries `values` (an array), not `value`, so the
+     * old `typeof def.value === "string"` was always false. And Zod 4 folds
+     * native enums into "enum", which made the "nativeEnum" branch below dead
+     * and left `case "enum": return true` accepting numeric enums it was
+     * written to reject — a TS numeric enum's entries hold both directions,
+     * {"0":"James","James":0}, so checking every value is a string rejects it.
+     */
     case "literal":
-      return typeof def.value === "string";
-
-    case "enum":
-      return true;
-
-    case "nativeEnum":
-      return !Object.values(def.values).some(
-        (value) => typeof value === "number"
+      return (
+        Array.isArray(def.values) &&
+        def.values.length > 0 &&
+        def.values.every((v: unknown) => typeof v === "string")
       );
+
+    case "enum": {
+      const values = Object.values(def.entries ?? {});
+      return values.length > 0 && values.every((v) => typeof v === "string");
+    }
 
     case "union":
       return def.options.every((option: any) =>
@@ -185,11 +194,25 @@ export const instanceofZodTypeCoercible = (
    * "must be ZodString, ZodNumber, ZodBoolean, ZodBigInt or ZodDate". A plain
    * z.string() query parameter was rejected whenever coercion was enabled.
    */
-  return (
+  if (
     def === "string" ||
     def === "number" ||
     def === "boolean" ||
     def === "bigint" ||
     def === "date"
-  );
+  ) {
+    return true;
+  }
+
+  /*
+   * Anything that reduces to a string is coercible too: a string-valued
+   * literal or enum, and unions/intersections of those. `?status=active`
+   * against z.enum(["active","idle"]) is ordinary REST, and rejecting it
+   * aborted generation of the WHOLE document rather than one route.
+   *
+   * Delegating keeps one definition of "string-like" instead of two that can
+   * drift. Numeric members stay rejected — z.literal(5) really would need
+   * coercing, and passing the raw "5" through would fail at request time.
+   */
+  return instanceofZodTypeLikeString(type);
 };
