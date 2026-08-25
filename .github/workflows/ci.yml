@@ -1,29 +1,21 @@
 name: CI
 
-# Builds the package on every PR and on pushes to main.
+# Builds and tests the package on every PR and on pushes to main.
 #
 # There was no CI here at all: nothing triggered on pull_request, and
 # publish.yml never ran a build or a test before publishing. So a change that
 # did not compile could reach GitHub Packages, and `kuploy` and `kuploy-cloud`
 # would find out on their next install.
 #
-# BUILD ONLY, DELIBERATELY. `pnpm test` is `tsc --noEmit && jest`, and it does
-# not pass on main today: the package is mid-migration between Zod majors.
-# `peerDependencies` declares zod ^3.14.4, `devDependencies` installs ^4.3.6,
-# and the source is half-converted — src/generator/schema.ts still calls Zod 3's
-# schema.isOptional(), which Zod 4 removed. Measured on main:
+# `test` is gated as of #7. It was build-only before that: the suite was
+# inherited from upstream Dokploy, had been red since the fork rewrote src/,
+# and wiring it in would have landed a permanently red required check. Adapting
+# it (#4, #5, #6, #7) surfaced seven shipped bugs -- a red suite nobody could
+# read was hiding live defects -- and the last six failures are now closed, so
+# 86/86 pass against zod 4 and the check is meaningful.
 #
-#   with zod 4 (as locked): build passes, tsc fails on 2 test files, 45/52 tests fail
-#   with zod 3 (as peered): tsc passes after 3 small source fixes, 70/86 tests fail
-#
-# Neither major works end to end. Wiring `test` in now would land a permanently
-# red required check and teach everyone to ignore it. `build` is green today and
-# is the thing that protects consumers, so it goes in first; `test` follows once
-# the Zod target is decided.
-#
-# Not urgent for consumers: kuploy and kuploy-cloud both pin zod ^3.25.32 and
-# the published 0.0.6 works for them. It blocks developing this package, not
-# using it.
+# `pnpm test` is `tsc --noEmit && jest`, so this also type-checks the tests,
+# which `pnpm run build` (tsconfig.build.json) excludes.
 
 on:
   pull_request:
@@ -54,3 +46,4 @@ jobs:
       # `--no-frozen-lockfile` allows today.
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
+      - run: pnpm test
