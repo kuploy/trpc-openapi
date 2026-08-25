@@ -176,7 +176,18 @@ export const instanceofZodTypeLikeString = (
         instanceofZodTypeLikeString(def.right)
       );
 
-    case "preprocess":
+    /*
+     * Zod 3 made z.preprocess() a ZodEffects and this check returned true for
+     * any of them: a preprocess IS the caller taking responsibility for turning
+     * the raw query string into the inner type, so the inner type is not ours
+     * to police. Zod 4 emits a ZodPipe instead, so the "preprocess" case above
+     * became unreachable and every preprocessed query parameter started being
+     * rejected as "must be ZodString".
+     *
+     * unwrapZodType(_, false) leaves a preprocess wrapped and unwraps a plain
+     * transform to its `in`, so a "pipe" surviving to here is a preprocess.
+     */
+    case "pipe":
       return true;
 
     default:
