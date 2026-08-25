@@ -75,17 +75,17 @@ describe('next adapter', () => {
   test('with valid routes', async () => {
     const appRouter = t.router({
       sayHelloQuery: t.procedure
-        .meta({ openapi: { method: 'GET', path: '/say-hello' } })
+        .meta({ openapi: { override: true, method: 'GET', path: '/say-hello' } })
         .input(z.object({ name: z.string() }))
         .output(z.object({ greeting: z.string() }))
         .query(({ input }) => ({ greeting: `Hello ${input.name}!` })),
       sayHelloMutation: t.procedure
-        .meta({ openapi: { method: 'POST', path: '/say-hello' } })
+        .meta({ openapi: { override: true, method: 'POST', path: '/say-hello' } })
         .input(z.object({ name: z.string() }))
         .output(z.object({ greeting: z.string() }))
         .mutation(({ input }) => ({ greeting: `Hello ${input.name}!` })),
       sayHelloSlash: t.procedure
-        .meta({ openapi: { method: 'GET', path: '/say/hello' } })
+        .meta({ openapi: { override: true, method: 'GET', path: '/say/hello' } })
         .input(z.object({ name: z.string() }))
         .output(z.object({ greeting: z.string() }))
         .query(({ input }) => ({ greeting: `Hello ${input.name}!` })),

@@ -73,15 +73,28 @@ export const unwrapZodType = (
     case "lazy":
       return unwrapZodType(def.getter(), unwrapPreprocess);
 
+    /*
+     * Zod 4 folds .transform() and .preprocess() into one node, ZodPipe, whose
+     * def carries `in`/`out` — there is no `def.schema`, so the previous branch
+     * silently unwrapped to undefined and every transformed or preprocessed
+     * query parameter was rejected as non-coercible.
+     *
+     * The two are told apart by which side holds the transform:
+     *   z.string().transform(fn)    in = string,    out = transform
+     *   z.preprocess(fn, z.string()) in = transform, out = string
+     *
+     * For a transform the source type is `in` — that is what a request must
+     * actually supply. For a preprocess it is `out`, and only when the caller
+     * asked to see through it, matching the old unwrapPreprocess contract.
+     */
     case "transform":
-    case "pipe":
-      return unwrapZodType(def.schema, unwrapPreprocess);
-
-    case "preprocess":
-      if (unwrapPreprocess) {
-        return unwrapZodType(def.schema, unwrapPreprocess);
+    case "pipe": {
+      const isPreprocess = (def.in as any)?._zod?.def?.type === "transform";
+      if (isPreprocess) {
+        return unwrapPreprocess ? unwrapZodType(def.out, unwrapPreprocess) : type;
       }
-      return type;
+      return unwrapZodType(def.in, unwrapPreprocess);
+    }
 
     default:
       return type;
@@ -119,16 +132,25 @@ export const instanceofZodTypeLikeString = (
     case "string":
       return true;
 
+    /*
+     * Zod 4 shapes. A literal carries `values` (an array), not `value`, so the
+     * old `typeof def.value === "string"` was always false. And Zod 4 folds
+     * native enums into "enum", which made the "nativeEnum" branch below dead
+     * and left `case "enum": return true` accepting numeric enums it was
+     * written to reject — a TS numeric enum's entries hold both directions,
+     * {"0":"James","James":0}, so checking every value is a string rejects it.
+     */
     case "literal":
-      return typeof def.value === "string";
-
-    case "enum":
-      return true;
-
-    case "nativeEnum":
-      return !Object.values(def.values).some(
-        (value) => typeof value === "number"
+      return (
+        Array.isArray(def.values) &&
+        def.values.length > 0 &&
+        def.values.every((v: unknown) => typeof v === "string")
       );
+
+    case "enum": {
+      const values = Object.values(def.entries ?? {});
+      return values.length > 0 && values.every((v) => typeof v === "string");
+    }
 
     case "union":
       return def.options.every((option: any) =>
@@ -167,10 +189,30 @@ export const instanceofZodTypeCoercible = (
   const type = unwrapZodType(_type, false);
   const def = (type as any)?._zod?.def?.type;
 
-  return (
+  /*
+   * "string" was missing, though the error raised on failure says the key
+   * "must be ZodString, ZodNumber, ZodBoolean, ZodBigInt or ZodDate". A plain
+   * z.string() query parameter was rejected whenever coercion was enabled.
+   */
+  if (
+    def === "string" ||
     def === "number" ||
     def === "boolean" ||
     def === "bigint" ||
     def === "date"
-  );
+  ) {
+    return true;
+  }
+
+  /*
+   * Anything that reduces to a string is coercible too: a string-valued
+   * literal or enum, and unions/intersections of those. `?status=active`
+   * against z.enum(["active","idle"]) is ordinary REST, and rejecting it
+   * aborted generation of the WHOLE document rather than one route.
+   *
+   * Delegating keeps one definition of "string-like" instead of two that can
+   * drift. Numeric members stay rejected — z.literal(5) really would need
+   * coercing, and passing the raw "5" through would fail at request time.
+   */
+  return instanceofZodTypeLikeString(type);
 };
