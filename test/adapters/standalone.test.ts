@@ -170,9 +170,8 @@ describe("standalone adapter", () => {
         {
           code: "invalid_type",
           expected: "string",
-          message: "Required",
+          message: "Invalid input: expected string, received undefined",
           path: ["payload"],
-          received: "undefined",
         },
       ],
     });
@@ -211,9 +210,8 @@ describe("standalone adapter", () => {
         {
           code: "invalid_type",
           expected: "string",
-          message: "Required",
+          message: "Invalid input: expected string, received undefined",
           path: ["payload"],
-          received: "undefined",
         },
       ],
     });
@@ -248,9 +246,8 @@ describe("standalone adapter", () => {
         {
           code: "invalid_type",
           expected: "string",
-          message: "Required",
+          message: "Invalid input: expected string, received undefined",
           path: ["payload"],
-          received: "undefined",
         },
       ],
     });
@@ -289,9 +286,8 @@ describe("standalone adapter", () => {
         {
           code: "invalid_type",
           expected: "string",
-          message: "Expected string, received number",
+          message: "Invalid input: expected string, received number",
           path: ["payload"],
-          received: "number",
         },
       ],
     });
