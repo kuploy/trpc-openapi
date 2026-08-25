@@ -117,14 +117,39 @@ export const createOpenApiNodeHttpHandler = <
 				};
 			}
 
-			// if supported, coerce all string values to correct types
+			/*
+			 * Coercion, scoped by what the transport can actually carry.
+			 *
+			 * A query string is always text: `?n=123` must become a number
+			 * before z.number() will take it, so everything coercible is fair
+			 * game there.
+			 *
+			 * A JSON body is different. It already carries real types, so
+			 * coercing indiscriminately means POSTing {"payload": 123} to a
+			 * z.string() field silently becomes "123" and returns 200 — the API
+			 * accepting input its own schema rejects. But JSON cannot express
+			 * every type either: a Date arrives as a string and a BigInt as a
+			 * string or number, and those genuinely do need coercing.
+			 *
+			 * So: in a body, coerce only what JSON has no representation for.
+			 * string / number / boolean are left alone, and a mismatch there is
+			 * reported as the client error it is.
+			 *
+			 * KNOWN LIMITATION, deliberately not fixed here: this mutates the
+			 * caller's schema in place and never restores it, so a schema shared
+			 * between a GET and a POST route stays coerced for the body route
+			 * too, for the life of the process. Fixing that means building a
+			 * coerced clone per request rather than mutating.
+			 */
+			const JSON_CANNOT_EXPRESS = new Set(["date", "bigint"]);
 			if (zodSupportsCoerce) {
 				if (instanceofZodTypeObject(unwrappedSchema)) {
 					Object.values(unwrappedSchema.shape).forEach((shapeSchema) => {
 						const unwrappedShapeSchema = unwrapZodType(shapeSchema, false);
-						if (instanceofZodTypeCoercible(unwrappedShapeSchema)) {
-							unwrappedShapeSchema._def.coerce = true;
-						}
+						if (!instanceofZodTypeCoercible(unwrappedShapeSchema)) return;
+						const kind = (unwrappedShapeSchema as any)?._zod?.def?.type;
+						if (useBody && !JSON_CANNOT_EXPRESS.has(kind)) return;
+						unwrappedShapeSchema._def.coerce = true;
 					});
 				}
 			}
@@ -193,8 +218,15 @@ export const createOpenApiNodeHttpHandler = <
 					? "Input validation failed"
 					: errorShape?.message ?? error.message ?? "An error occurred",
 				code: error.code,
+				/*
+				 * `.issues`, not `.errors`. Zod 4 renamed it, and since the old
+				 * name simply reads as undefined rather than throwing, every
+				 * validation error response silently lost its issues array —
+				 * clients got `{message, code}` and no indication of WHICH field
+				 * was wrong.
+				 */
 				issues: isInputValidationError
-					? (error.cause as ZodError).errors
+					? (error.cause as ZodError).issues
 					: undefined,
 			};
 			sendResponse(statusCode, headers, body);
